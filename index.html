@@ -777,7 +777,8 @@ var ICONS = {
   download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 11.5 12 16l4.5-4.5"/><path d="M5 19h14"/></svg>',
   grip: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
   menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
-  users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><circle cx="17" cy="9" r="2.4"/><path d="M15.5 13.2c2.2.3 3.8 2 3.8 4.3"/></svg>'
+  users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><circle cx="17" cy="9" r="2.4"/><path d="M15.5 13.2c2.2.3 3.8 2 3.8 4.3"/></svg>',
+  mail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5.5" width="17" height="13" rx="1.5"/><path d="M4 7l8 6 8-6"/></svg>'
 };
 
 /* =====================================================================
@@ -2094,7 +2095,7 @@ function fleetStatusBannerHTML(vessels, allInspections){
 function renderFleetStatus(){
   return Promise.all([getVessels(), getInspections()]).then(function(results){
     var vessels = results[0], inspections = results[1];
-    if(isTechManagerRole()) vessels = vessels.filter(function(v){ return vesselAllowedForRole(v.name); });
+    if(isTechManagerRole() || isVesselManagerRole()) vessels = vessels.filter(function(v){ return vesselAllowedForRole(v.name); });
     var bodyHtml;
     if(!vessels.length){
       bodyHtml = '';
@@ -2227,7 +2228,7 @@ function wireVesselHistory(){
    user + db capabilities; degrades to an explanatory empty state when
    either is unavailable rather than a hard error.
    ===================================================================== */
-var manageUsersCache = {}; // id -> {name, role, fleet}, filled by the last render
+var manageUsersCache = {}; // email -> {name, role, fleet}, filled by the last render
 function renderManageUsers(){
   if(!guardAdminOnly()) return Promise.resolve('<div class="loading">Redirecting\u2026</div>');
   var header = '' +
@@ -2235,39 +2236,36 @@ function renderManageUsers(){
     '<button class="back" data-action="back">'+ICONS.back+'</button>'+
     '<div class="title-wrap"><h1>Manage users</h1></div>'+
   '</div>';
-  if(!cloudUser || !syncEnabled){
+  if(!sb){
     return Promise.resolve(header +
-      '<div class="empty-state">'+ICONS.ship+'<p>Role management needs this page\u2019s User and Db access, which isn\u2019t available in this view.</p></div>');
+      '<div class="empty-state">'+ICONS.ship+'<p>Role management needs this app\u2019s Supabase connection, which isn\u2019t available in this view.</p></div>');
   }
-  return cloudDb.collection('user_roles').get().then(function(snap){
-    var docs = (snap.docs||[]).filter(function(d){ return d.exists; });
-    var ids = docs.map(function(d){ return d.id; });
-    return cloudUser.profiles(ids).then(function(profiles){
-      manageUsersCache = {};
-      docs.forEach(function(d){
-        var data = d.data()||{};
-        manageUsersCache[d.id] = {name:(profiles[d.id]||{}).name||'', role:data.role||'', fleet:data.fleet||[]};
-      });
-      var rowsHtml = docs.map(function(d){
-        var info = manageUsersCache[d.id];
-        var roleLabel = info.role==='admin' ? 'Admin' : info.role==='director' ? 'Director' : info.role==='techManager' ? 'Tech Manager' : 'Unassigned';
-        var fleetNote = info.role==='techManager' ? (info.fleet.length+' vessel'+(info.fleet.length===1?'':'s')) : '';
-        return '' +
-        '<div class="inspection-card" data-user-row="'+escapeHtml(d.id)+'">'+
-          '<div class="body">'+
-            '<div class="vname">'+escapeHtml(info.name||'Unknown person')+'</div>'+
-            '<div class="vmeta">'+escapeHtml(roleLabel)+(fleetNote?' \u00b7 '+escapeHtml(fleetNote):'')+'</div>'+
-          '</div>'+
-          '<button class="icon-btn" data-menu-user="'+escapeHtml(d.id)+'" aria-label="More options">'+ICONS.dots+'</button>'+
-        '</div>';
-      }).join('');
-      return header +
-      '<div class="section-pad fab-new">'+
-        '<button class="btn btn-primary btn-block" id="btnAssignUser">'+ICONS.plus+'Assign a role</button>'+
-      '</div>'+
-      (docs.length ? rowsHtml : '<div class="empty-state">'+ICONS.ship+'<p>No one has a role assigned yet. As the artifact owner, you always have full admin access regardless of this list.</p></div>')+
-      '<p class="footer-note">Roles decide what this app shows each person \u2014 not a hard security lock on the underlying data.</p>';
+  return sb.from('user_roles').select('*').order('email').then(function(res){
+    if(res.error) throw res.error;
+    var rows = res.data || [];
+    manageUsersCache = {};
+    rows.forEach(function(r){
+      manageUsersCache[r.email] = {name:r.name||'', role:r.role||'', fleet:r.fleet||[]};
     });
+    var rowsHtml = rows.map(function(r){
+      var info = manageUsersCache[r.email];
+      var roleLabel = info.role==='admin' ? 'Admin' : info.role==='director' ? 'Director' : info.role==='techManager' ? 'Tech Manager' : info.role==='vesselManager' ? 'Vessel Manager' : 'Unassigned';
+      var fleetNote = (info.role==='techManager' || info.role==='vesselManager') ? (info.fleet.length+' vessel'+(info.fleet.length===1?'':'s')) : '';
+      return '' +
+      '<div class="inspection-card" data-user-row="'+escapeHtml(r.email)+'">'+
+        '<div class="body">'+
+          '<div class="vname">'+escapeHtml(info.name||r.email)+'</div>'+
+          '<div class="vmeta">'+escapeHtml(r.email)+' \u00b7 '+escapeHtml(roleLabel)+(fleetNote?' \u00b7 '+escapeHtml(fleetNote):'')+'</div>'+
+        '</div>'+
+        '<button class="icon-btn" data-menu-user="'+escapeHtml(r.email)+'" aria-label="More options">'+ICONS.dots+'</button>'+
+      '</div>';
+    }).join('');
+    return header +
+    '<div class="section-pad fab-new">'+
+      '<button class="btn btn-primary btn-block" id="btnAssignUser">'+ICONS.plus+'Assign a role</button>'+
+    '</div>'+
+    (rows.length ? rowsHtml : '<div class="empty-state">'+ICONS.ship+'<p>No one has a role assigned yet. '+escapeHtml(BOOTSTRAP_ADMIN_EMAIL)+' always has full admin access regardless of this list.</p></div>')+
+    '<p class="footer-note">Roles decide what this app shows each person \u2014 not a hard security lock on the underlying data.</p>';
   }).catch(function(){
     return header + '<div class="empty-state">'+ICONS.ship+'<p>Couldn\u2019t load the current assignments. Try again in a moment.</p></div>';
   });
@@ -2278,22 +2276,28 @@ function wireManageUsers(){
 
   var addBtn = document.getElementById('btnAssignUser');
   if(addBtn) addBtn.addEventListener('click', function(){
-    navigate('assignUser', {assignUserId:null, assignUserName:'', assignUserRole:'', assignUserFleet:[]});
+    navigate('assignUser', {assignUserEmail:null, assignUserName:'', assignUserRole:'', assignUserFleet:[]});
   });
 
   document.querySelectorAll('[data-menu-user]').forEach(function(btn){
     btn.addEventListener('click', function(e){
       e.stopPropagation();
-      var id = btn.getAttribute('data-menu-user');
-      var info = manageUsersCache[id] || {name:'',role:'',fleet:[]};
+      var email = btn.getAttribute('data-menu-user');
+      var info = manageUsersCache[email] || {name:'',role:'',fleet:[]};
       openSheet([
         {label:'Edit role', icon:ICONS.edit, onClick:function(){
-          navigate('assignUser', {assignUserId:id, assignUserName:info.name, assignUserRole:info.role, assignUserFleet:info.fleet});
+          navigate('assignUser', {assignUserEmail:email, assignUserName:info.name, assignUserRole:info.role, assignUserFleet:info.fleet});
+        }},
+        {label:'Copy invite message', icon:ICONS.mail, onClick:function(){
+          showInviteMessage(email, info.role, info.name);
         }},
         {label:'Remove access', icon:ICONS.trash, danger:true, onClick:function(){
           showConfirm('Remove this person\u2019s access? They won\u2019t be able to use this app until reassigned.').then(function(ok){
             if(!ok) return;
-            cloudDb.doc('user_roles/'+id).delete().then(function(){ toast('Access removed'); render(); });
+            sb.from('user_roles').delete().eq('email', email).then(function(res){
+              if(res.error){ toast('Could not remove access \u2014 try again'); return; }
+              toast('Access removed'); render();
+            });
           });
         }}
       ]);
@@ -2301,13 +2305,50 @@ function wireManageUsers(){
   });
 }
 
-/* Add/edit one person's role. Adding searches the organization directory
-   (an 8-result typeahead, not a full roster — see the user capability's
-   own docs); editing already knows who, so the search step is skipped. */
-var assignSelectedUser = {id:null, name:''};
+/* Add/edit one person's role. There's no way to search Supabase's user
+   directory from the browser with just the anon key, so an admin assigns
+   a role by typing the exact email the person will sign in with (see
+   assignEmailInput below) rather than picking from a search result. */
+function inviteMessageFor(email, role, name){
+  var roleLabel = role==='admin' ? 'Admin' : role==='director' ? 'Director' : role==='techManager' ? 'Tech Manager' : role==='vesselManager' ? 'Vessel Manager' : 'a user of';
+  var url = (typeof window!=='undefined' && window.location) ? (window.location.origin + window.location.pathname) : '';
+  return 'Hi'+(name?' '+name:'')+',\n\n'+
+    'You’ve been added to Ozellar All Right Inspection as '+(/^[aeiou]/i.test(roleLabel)?'an ':'a ')+roleLabel+'.\n\n'+
+    'Open the app and sign in — if you don’t have an account yet, choose "Create account" — using this exact email address:\n'+email+'\n\n'+
+    (url ? url+'\n\n' : '')+
+    'Your access is tied to this email, so please use it to sign up.';
+}
+function showInviteMessage(email, role, name){
+  var msg = inviteMessageFor(email, role, name);
+  var backdrop = document.createElement('div');
+  backdrop.className = 'sheet-backdrop';
+  var panel = document.createElement('div');
+  panel.className = 'form-sheet';
+  panel.innerHTML = '' +
+    '<h3>Invite '+escapeHtml(name||email)+'</h3>'+
+    '<div class="field"><label>Send them this</label><textarea id="inviteMsgBox" rows="7" readonly style="width:100%;resize:vertical;">'+escapeHtml(msg)+'</textarea></div>'+
+    '<div class="form-actions">'+
+      '<button class="btn btn-outline" id="inviteCloseBtn">Close</button>'+
+      '<button class="btn btn-primary" id="inviteCopyBtn">Copy</button>'+
+    '</div>';
+  document.body.appendChild(backdrop);
+  document.body.appendChild(panel);
+  function close(){ backdrop.remove(); panel.remove(); }
+  backdrop.addEventListener('click', close);
+  document.getElementById('inviteCloseBtn').addEventListener('click', close);
+  document.getElementById('inviteCopyBtn').addEventListener('click', function(){
+    var box = document.getElementById('inviteMsgBox');
+    function manual(){ if(box){ box.focus(); box.select(); } toast('Selected — copy with Ctrl/Cmd+C'); }
+    try{
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(msg).then(function(){ toast('Invite message copied'); }).catch(manual);
+      } else manual();
+    }catch(e){ manual(); }
+  });
+}
 function renderAssignUser(){
-  if(!guardAdminOnly()) return Promise.resolve('<div class="loading">Redirecting\u2026</div>');
-  var isEdit = !!state.assignUserId;
+  if(!guardAdminOnly()) return Promise.resolve('<div class="loading">Redirecting…</div>');
+  var isEdit = !!state.assignUserEmail;
   return getVessels().then(function(vessels){
     var role = state.assignUserRole || '';
     var fleet = state.assignUserFleet || [];
@@ -2325,112 +2366,92 @@ function renderAssignUser(){
       '<div class="title-wrap"><h1>'+(isEdit?'Edit role':'Assign a role')+'</h1></div>'+
     '</div>'+
     '<div class="form-wrap">'+
-      (isEdit
-        ? '<div class="field"><label>Person</label><div class="vessel-preview-card"><div class="vp-row"><span class="vp-v">'+escapeHtml(state.assignUserName||'Unknown person')+'</span></div></div></div>'
-        : '' +
-          '<div class="field">'+
-            '<label>Find person <span class="req">*</span></label>'+
-            '<input type="text" id="userSearchInput" placeholder="Type a name\u2026" autocomplete="off">'+
-            '<div id="userSearchResults"></div>'+
-          '</div>'+
-          '<div class="field" id="selectedUserField" style="display:none;">'+
-            '<label>Selected</label>'+
-            '<div class="vessel-preview-card"><div class="vp-row"><span class="vp-v" id="selectedUserNameDisplay"></span></div></div>'+
-          '</div>'
-      )+
+      '<div class="field">'+
+        '<label>Email <span class="req">*</span></label>'+
+        '<input type="email" id="assignEmailInput" placeholder="name@example.com" autocomplete="off"'+(isEdit?' disabled':'')+' value="'+escapeHtml(state.assignUserEmail||'')+'">'+
+        (isEdit ? '' : '<p class="footer-note" style="text-align:left;padding:4px 0 0;">This must be the exact email they’ll sign in with.</p>')+
+      '</div>'+
+      '<div class="field">'+
+        '<label>Name <span class="footer-note" style="display:inline;padding:0;">(optional, for your own reference)</span></label>'+
+        '<input type="text" id="assignNameInput" placeholder="Their name" autocomplete="off" value="'+escapeHtml(state.assignUserName||'')+'">'+
+      '</div>'+
       '<div class="field">'+
         '<label>Role</label>'+
         '<div class="seg" id="roleSeg">'+
           '<button type="button" data-val="admin" class="'+(role==='admin'?'selected':'')+'">Admin</button>'+
           '<button type="button" data-val="director" class="'+(role==='director'?'selected':'')+'">Director</button>'+
           '<button type="button" data-val="techManager" class="'+(role==='techManager'?'selected':'')+'">Tech Manager</button>'+
+          '<button type="button" data-val="vesselManager" class="'+(role==='vesselManager'?'selected':'')+'">Vessel Manager</button>'+
         '</div>'+
       '</div>'+
-      '<div id="fleetPickerWrap" style="'+(role==='techManager'?'':'display:none;')+'">'+
-        '<div class="seg-label">Fleet \u2014 vessels this Tech Manager can see and manage</div>'+
+      '<div id="fleetPickerWrap" style="'+((role==='techManager'||role==='vesselManager')?'':'display:none;')+'">'+
+        '<div class="seg-label" id="fleetPickerLabel">'+(role==='vesselManager' ? 'Vessel(s) — ships this Vessel Manager can see and manage' : 'Fleet — vessels this Tech Manager can see and manage')+'</div>'+
         '<div id="fleetCheckList">'+(vesselsHtml||'<p class="footer-note" style="text-align:left;padding:0;">No vessels added yet.</p>')+'</div>'+
       '</div>'+
       '<div class="form-actions">'+
         '<button class="btn btn-outline" id="btnCancelAssign">Cancel</button>'+
         '<button class="btn btn-primary" id="btnSaveAssign">Save</button>'+
       '</div>'+
+      (isEdit ? '' : '<p class="footer-note" style="text-align:left;padding-top:12px;">After saving, you’ll get an invite message to send them — you can also copy it again later from their row.</p>')+
     '</div>';
   });
 }
 function wireAssignUser(){
-  var isEdit = !!state.assignUserId;
-  assignSelectedUser = isEdit ? {id:state.assignUserId, name:state.assignUserName} : {id:null, name:''};
-
   var backBtn = document.querySelector('.appbar .back');
   if(backBtn) backBtn.addEventListener('click', function(){ navigate('manageUsers'); });
   var cancelBtn = document.getElementById('btnCancelAssign');
   if(cancelBtn) cancelBtn.addEventListener('click', function(){ navigate('manageUsers'); });
 
-  var searchInput = document.getElementById('userSearchInput');
-  var resultsBox = document.getElementById('userSearchResults');
-  var selectedField = document.getElementById('selectedUserField');
-  var selectedNameDisplay = document.getElementById('selectedUserNameDisplay');
-
-  function runSearch(q){
-    if(!cloudUser || !resultsBox) return;
-    cloudUser.search(q).then(function(results){
-      if(!document.getElementById('userSearchResults')) return; // navigated away mid-search
-      results = results || [];
-      if(!results.length){
-        resultsBox.innerHTML = '<div class="empty-state" style="margin:8px 0;"><p>No matches.</p></div>';
-        return;
-      }
-      resultsBox.innerHTML = results.map(function(p){
-        return '<div class="user-search-result" data-pick-user="'+escapeHtml(p.id)+'" data-pick-name="'+escapeHtml(p.name||'')+'">'+escapeHtml(p.name||'Someone')+'</div>';
-      }).join('');
-      resultsBox.querySelectorAll('[data-pick-user]').forEach(function(row){
-        row.addEventListener('click', function(){
-          assignSelectedUser = {id: row.getAttribute('data-pick-user'), name: row.getAttribute('data-pick-name')};
-          if(selectedNameDisplay) selectedNameDisplay.textContent = assignSelectedUser.name || 'Someone';
-          if(selectedField) selectedField.style.display = '';
-          resultsBox.innerHTML = '';
-          if(searchInput) searchInput.value = '';
-        });
-      });
-    }).catch(function(){});
-  }
-  if(searchInput){
-    searchInput.addEventListener('focus', function(){ if(!searchInput.value) runSearch(''); });
-    searchInput.addEventListener('input', function(){ runSearch(searchInput.value); });
-  }
-
   var roleSeg = document.getElementById('roleSeg');
   var fleetWrap = document.getElementById('fleetPickerWrap');
+  var fleetLabel = document.getElementById('fleetPickerLabel');
   if(roleSeg){
     roleSeg.querySelectorAll('button').forEach(function(btn){
       btn.addEventListener('click', function(){
         roleSeg.querySelectorAll('button').forEach(function(b){ b.classList.remove('selected'); });
         btn.classList.add('selected');
-        if(fleetWrap) fleetWrap.style.display = (btn.getAttribute('data-val')==='techManager') ? '' : 'none';
+        var val = btn.getAttribute('data-val');
+        var needsFleet = (val==='techManager' || val==='vesselManager');
+        if(fleetWrap) fleetWrap.style.display = needsFleet ? '' : 'none';
+        if(fleetLabel) fleetLabel.textContent = val==='vesselManager'
+          ? 'Vessel(s) — ships this Vessel Manager can see and manage'
+          : 'Fleet — vessels this Tech Manager can see and manage';
       });
     });
   }
 
+  var isEdit = !!state.assignUserEmail;
   var saveBtn = document.getElementById('btnSaveAssign');
   if(saveBtn) saveBtn.addEventListener('click', function(){
-    var targetId = assignSelectedUser.id;
-    var targetName = assignSelectedUser.name;
-    if(!targetId){ toast('Find and select a person first'); return; }
+    if(!sb){ toast('Not connected — try again in a moment'); return; }
+    var emailInput = document.getElementById('assignEmailInput');
+    var nameInput = document.getElementById('assignNameInput');
+    var email = isEdit ? (state.assignUserEmail||'') : ((emailInput && emailInput.value) || '').trim().toLowerCase();
+    var name = ((nameInput && nameInput.value) || '').trim();
+    if(!email || email.indexOf('@')===-1){ toast('Enter a valid email address'); return; }
     var roleBtn = roleSeg ? roleSeg.querySelector('button.selected') : null;
     var role = roleBtn ? roleBtn.getAttribute('data-val') : '';
     if(!role){ toast('Choose a role'); return; }
     var fleet = [];
-    if(role==='techManager'){
+    if(role==='techManager' || role==='vesselManager'){
       document.querySelectorAll('.fleet-vessel-checkbox:checked').forEach(function(cb){ fleet.push(cb.value); });
-      if(!fleet.length){ toast('Pick at least one vessel for their fleet'); return; }
+      if(!fleet.length){ toast(role==='vesselManager' ? 'Pick at least one vessel for them to manage' : 'Pick at least one vessel for their fleet'); return; }
     }
-    if(!cloudDb){ toast('Not connected \u2014 try again in a moment'); return; }
-    cloudDb.doc('user_roles/'+targetId).set({
-      role: role, fleet: fleet, name: targetName, updatedAt: Date.now()
-    }).then(function(){
+    if(email===BOOTSTRAP_ADMIN_EMAIL){
+      toast(BOOTSTRAP_ADMIN_EMAIL+' is always Admin — nothing to save');
+      return;
+    }
+    saveBtn.disabled = true;
+    sb.from('user_roles').upsert({
+      email: email, role: role, fleet: fleet, name: name, updated_at: new Date().toISOString()
+    }, {onConflict:'email'}).then(function(res){
+      saveBtn.disabled = false;
+      if(res.error){ toast('Could not save — try again'); return; }
       toast('Saved');
+      var wasEdit = isEdit;
       navigate('manageUsers');
-    }).catch(function(){ toast('Could not save \u2014 try again'); });
+      if(!wasEdit) showInviteMessage(email, role, name);
+    }).catch(function(){ saveBtn.disabled = false; toast('Could not save — try again'); });
   });
 }
 
@@ -2447,7 +2468,7 @@ function renderHome(){
   }
   return Promise.all([getInspections(), getVessels()]).then(function(results){
     var list = results[0], vessels = results[1];
-    if(isTechManagerRole()){
+    if(isTechManagerRole() || isVesselManagerRole()){
       list = list.filter(function(insp){ return vesselAllowedForRole(insp.vesselName); });
       vessels = vessels.filter(function(v){ return vesselAllowedForRole(v.name); });
     }
@@ -2497,7 +2518,7 @@ function renderHome(){
       '<div><div class="wordmark">Ozellar</div><div class="tagline">All Right Inspection</div></div>'+
     '</div>'+
     syncStatusBarHTML()+
-    (currentRole.type!=='admin' ? '<p class="footer-note" style="margin:0 0 10px;">Signed in as '+(isDirectorRole()?'Director':'Tech Manager')+(currentRole.name?' \u00b7 '+escapeHtml(currentRole.name):'')+'</p>' : '')+
+    (currentRole.type!=='admin' ? '<p class="footer-note" style="margin:0 0 10px;">Signed in as '+(isDirectorRole()?'Director':isTechManagerRole()?'Tech Manager':'Vessel Manager')+(currentRole.name?' \u00b7 '+escapeHtml(currentRole.name):'')+'</p>' : '')+
     actionRowHtml+
     fleetStatusBannerHTML(vessels, allInspections)+
     (rows.length ? '' +
@@ -2703,7 +2724,7 @@ function renderForm(){
   return Promise.all([loadInsp, getVessels()]).then(function(results){
     var insp = results[0], vessels = results[1];
     if(isEdit && insp && !guardVesselAccess(insp.vesselName)) return '<div class="loading">Redirecting\u2026</div>';
-    if(isTechManagerRole()) vessels = vessels.filter(function(v){ return vesselAllowedForRole(v.name); });
+    if(isTechManagerRole() || isVesselManagerRole()) vessels = vessels.filter(function(v){ return vesselAllowedForRole(v.name); });
     formVesselsCache = vessels;
     var v = insp || {vesselName:'',imo:'',vesselType:'',port:'',date:todayISO(),inspector:'',company:'',vesselPhoto:null,
       inspectionType:'port', completionDate:'', sailFromDate:'', sailFromPort:'', sailToDate:'', sailToPort:'', remoteFromDate:'', remoteToDate:''};
@@ -2906,8 +2927,8 @@ function goBackFromForm(){
    card, action-sheet and form-sheet-modal patterns used everywhere else.
    ===================================================================== */
 function renderVessels(){
-  if(isTechManagerRole()){
-    toast('See your fleet from Home or Fleet inspection status');
+  if(isTechManagerRole() || isVesselManagerRole()){
+    toast('See your vessels from Home or Fleet inspection status');
     navigate('home');
     return Promise.resolve('<div class="loading">Redirecting\u2026</div>');
   }
@@ -6173,14 +6194,24 @@ function sbPushLocalBacklog(){
   }).catch(function(){});
 }
 
+/* Re-resolves currentRole for whoever sbUser now is (or 'unassigned' if
+   nobody), then does the usual sync-status render. Every place below that
+   sets sbUser calls this instead of renderSyncStatus() directly — without
+   it, currentRole would keep pointing at whoever was signed in before,
+   which is exactly the bug this was built to close (everyone silently
+   staying/becoming Admin regardless of sign-in state). */
+function refreshRoleAndSync(){
+  return initUserRole().then(function(){ renderSyncStatus(); });
+}
 function sbSignIn(email, password){
   sbSyncState.authBusy = true; sbSyncState.authError = null; renderSyncStatus();
   return sb.auth.signInWithPassword({email:email, password:password}).then(function(res){
     sbSyncState.authBusy = false;
     if(res.error){ sbSyncState.authError = res.error.message; renderSyncStatus(); return; }
     sbUser = res.data.user;
-    renderSyncStatus();
-    return sbPullAll().then(function(){ return sbPushLocalBacklog(); });
+    return refreshRoleAndSync().then(function(){
+      return sbPullAll().then(function(){ return sbPushLocalBacklog(); });
+    });
   });
 }
 function sbSignUp(email, password){
@@ -6189,8 +6220,9 @@ function sbSignUp(email, password){
     sbSyncState.authBusy = false;
     if(res.error){ sbSyncState.authError = res.error.message; renderSyncStatus(); return; }
     sbUser = res.data.user;
-    renderSyncStatus();
-    if(sbUser) return sbPullAll().then(function(){ return sbPushLocalBacklog(); });
+    return refreshRoleAndSync().then(function(){
+      if(sbUser) return sbPullAll().then(function(){ return sbPushLocalBacklog(); });
+    });
   });
 }
 /* Forgets the session locally no matter what — even when the network
@@ -6203,7 +6235,7 @@ function sbSignUp(email, password){
 function sbSignOut(){
   function forget(){
     sbUser = null;
-    renderSyncStatus();
+    refreshRoleAndSync();
   }
   return sb.auth.signOut().then(forget).catch(forget);
 }
@@ -6211,16 +6243,17 @@ function sbInitAuth(){
   if(!sb) return;
   sb.auth.onAuthStateChange(function(event, session){
     sbUser = session ? session.user : null;
-    renderSyncStatus();
+    refreshRoleAndSync();
   });
   sb.auth.getSession().then(function(res){
     sbUser = (res.data && res.data.session) ? res.data.session.user : null;
-    renderSyncStatus();
-    /* Also reconciles any pre-existing local backlog on ordinary app
-       open (not just a fresh sign-in), so a device that was already
-       signed in before this backlog fix existed picks it up the next
-       time it's opened, without needing to sign out and back in. */
-    if(sbUser) sbPullAll().then(function(){ return sbPushLocalBacklog(); });
+    refreshRoleAndSync().then(function(){
+      /* Also reconciles any pre-existing local backlog on ordinary app
+         open (not just a fresh sign-in), so a device that was already
+         signed in before this backlog fix existed picks it up the next
+         time it's opened, without needing to sign out and back in. */
+      if(sbUser) sbPullAll().then(function(){ return sbPushLocalBacklog(); });
+    });
   }).catch(function(){});
   if(typeof window!=='undefined'){
     window.addEventListener('online', function(){ sbPushDirty(); sbPullAll(); });
@@ -6238,8 +6271,24 @@ function sbInitAuth(){
    would leave a stale, fully-populated home screen sitting behind it
    (or a stale gate lingering after signing in), exactly what the gate
    exists to prevent. */
+var sbGateWasActive = false;
 function renderSyncStatus(){
-  if(sbAuthGateActive()){ render(); return; }
+  var gateNow = sbAuthGateActive();
+  if(gateNow || sbGateWasActive){
+    // Either the gate should be showing right now, or it just stopped
+    // being needed (a sign-in/sign-up just succeeded). Both are always a
+    // full render, even when state.view is left over from whatever
+    // screen was showing before the person got signed out — any screen
+    // that isn't right for the new role bounces itself back to Home via
+    // its own guardAdminOnly()/guardVesselAccess() check, same as
+    // navigating there directly would. Without this, a sign-in whose
+    // leftover view wasn't already 'home' left the gate stuck on screen
+    // even though sbUser (and currentRole) had actually moved on.
+    sbGateWasActive = gateNow;
+    render();
+    return;
+  }
+  sbGateWasActive = gateNow;
   var el = document.querySelector('.sync-bar');
   if(el && state.view==='home'){
     var parent = el.parentNode;
@@ -6253,55 +6302,98 @@ function renderSyncStatus(){
 }
 
 /* =====================================================================
-   ACCESS CONTROL — three roles on top of the shared data:
-     admin        full control of everything (vessels, inspections, roles)
-     director     sees every vessel and every report; changes nothing
-     techManager  full control, but only over their OWN assigned fleet
+   ACCESS CONTROL — four roles on top of the shared data:
+     admin          full control of everything (vessels, inspections, roles)
+     director       sees every vessel and every report; changes nothing
+     techManager    full control, but only over their OWN assigned fleet
+     vesselManager  same as techManager, but scoped to just the one or
+                     two vessels an admin assigned them (no vessel-list
+                     management screen of their own — same as techManager)
    IMPORTANT LIMITATION, stated plainly: this is enforced by this page's
-   own screens, not by the underlying data store. By default the db
-   capability lets every signed-in viewer who can interact with this
-   artifact read and write its shared documents — the same as before
-   this feature existed — so a role recorded here decides what a person
-   is SHOWN and steered toward, not what a technically determined viewer
-   could still do by writing to the shared data directly (e.g. from the
-   browser console). Treat it as a workflow guardrail for the team, not
-   a security boundary against a malicious insider.
-   The artifact's owner always resolves to admin, independent of
+   own screens, not by the underlying data store. On the real deployment
+   (GitHub Pages + Supabase), row-level security policies on the
+   user_roles table itself are the actual security boundary — see the
+   setup SQL shipped alongside this file — but every other shared table
+   (inspections, vessels, etc.) is still readable/writable by any signed-in
+   user, same as before this feature existed. Treat role as a workflow
+   guardrail for the team, not a lock against a malicious insider.
+   BOOTSTRAP_ADMIN_EMAIL always resolves to admin, independent of
    anything stored in user_roles, so there is always at least one person
    who can open "Manage users" and hand out the other roles — including
-   on a freshly copied version of this app where user_roles is empty.
+   on a freshly copied project where user_roles is empty or doesn't
+   exist yet.
    ===================================================================== */
+var BOOTSTRAP_ADMIN_EMAIL = 'pavan.trivedi96@gmail.com';
 var currentRole = {type:'admin', fleet:null, userId:null, name:''};
 function initUserRole(){
-  if(!cloudUser){
+  // Artifact-hosted runtime (Claude's own window.claude capabilities) —
+  // a separate, older role store from the Supabase one below. Only ever
+  // active when this page is opened as a published Claude artifact with
+  // the user + db capabilities granted; inert (cloudUser stays null) on
+  // the real GitHub Pages deployment, which falls through to Supabase.
+  if(cloudUser){
+    return cloudUser.me().then(function(viewer){
+      if(viewer.isOwner){
+        currentRole = {type:'admin', fleet:null, userId:viewer.id, name:viewer.name};
+        return currentRole;
+      }
+      if(!syncEnabled){
+        // No shared store to hold roles in — behave exactly as before this
+        // feature existed rather than locking a local/offline session out.
+        currentRole = {type:'admin', fleet:null, userId:viewer.id, name:viewer.name};
+        return currentRole;
+      }
+      if(!viewer.id){
+        currentRole = {type:'unassigned', fleet:[], userId:null, name:viewer.name};
+        return currentRole;
+      }
+      return cloudDb.doc('user_roles/'+viewer.id).get().then(function(snap){
+        var data = snap.exists ? (snap.data()||{}) : {};
+        currentRole = {type:data.role||'unassigned', fleet:data.fleet||[], userId:viewer.id, name:viewer.name};
+        return currentRole;
+      }).catch(function(){
+        currentRole = {type:'unassigned', fleet:[], userId:viewer.id, name:viewer.name};
+        return currentRole;
+      });
+    }).catch(function(){
+      currentRole = {type:'admin', fleet:null, userId:null, name:''};
+      return currentRole;
+    });
+  }
+
+  // Real deployment: role lives in Supabase's user_roles table, keyed by
+  // the signed-in person's email (see the setup SQL for the table + RLS
+  // policies). Re-run this any time sbUser changes (sbSignIn/sbSignUp/
+  // sbSignOut/sbInitAuth all do, via refreshRoleAndSync below) — it is
+  // NOT automatically kept in sync otherwise.
+  if(!sb){
+    // No backend configured at all (a bare saved copy of this file with
+    // no Supabase script tag) — behave exactly as before this feature
+    // existed rather than locking a local/offline session out.
     currentRole = {type:'admin', fleet:null, userId:null, name:''};
     return Promise.resolve(currentRole);
   }
-  return cloudUser.me().then(function(viewer){
-    if(viewer.isOwner){
-      currentRole = {type:'admin', fleet:null, userId:viewer.id, name:viewer.name};
+  var email = ((sbUser && sbUser.email) || '').trim().toLowerCase();
+  if(!email){
+    // Not signed in (yet) — the login gate normally covers this, but
+    // keep a safe, access-nothing default in case it doesn't.
+    currentRole = {type:'unassigned', fleet:[], userId:null, name:''};
+    return Promise.resolve(currentRole);
+  }
+  if(email===BOOTSTRAP_ADMIN_EMAIL){
+    currentRole = {type:'admin', fleet:null, userId:sbUser.id, name:currentRole.name||''};
+    return Promise.resolve(currentRole);
+  }
+  return sb.from('user_roles').select('*').eq('email', email).maybeSingle().then(function(res){
+    if(res.error || !res.data){
+      currentRole = {type:'unassigned', fleet:[], userId:sbUser.id, name:''};
       return currentRole;
     }
-    if(!syncEnabled){
-      // No shared store to hold roles in — behave exactly as before this
-      // feature existed rather than locking a local/offline session out.
-      currentRole = {type:'admin', fleet:null, userId:viewer.id, name:viewer.name};
-      return currentRole;
-    }
-    if(!viewer.id){
-      currentRole = {type:'unassigned', fleet:[], userId:null, name:viewer.name};
-      return currentRole;
-    }
-    return cloudDb.doc('user_roles/'+viewer.id).get().then(function(snap){
-      var data = snap.exists ? (snap.data()||{}) : {};
-      currentRole = {type:data.role||'unassigned', fleet:data.fleet||[], userId:viewer.id, name:viewer.name};
-      return currentRole;
-    }).catch(function(){
-      currentRole = {type:'unassigned', fleet:[], userId:viewer.id, name:viewer.name};
-      return currentRole;
-    });
+    var data = res.data;
+    currentRole = {type:data.role||'unassigned', fleet:data.fleet||[], userId:sbUser.id, name:data.name||''};
+    return currentRole;
   }).catch(function(){
-    currentRole = {type:'admin', fleet:null, userId:null, name:''};
+    currentRole = {type:'unassigned', fleet:[], userId:sbUser.id, name:''};
     return currentRole;
   });
 }
@@ -6309,12 +6401,16 @@ function effectiveRole(){ return currentRole; }
 function isAdminRole(){ return effectiveRole().type==='admin'; }
 function isDirectorRole(){ return effectiveRole().type==='director'; }
 function isTechManagerRole(){ return effectiveRole().type==='techManager'; }
+function isVesselManagerRole(){ return effectiveRole().type==='vesselManager'; }
 function isUnassignedRole(){ return effectiveRole().type==='unassigned'; }
-/* True for admin/director (see everything) and for a tech manager whose
-   fleet includes this vessel name; false only narrows a tech manager's
-   own view down to their assigned ships. */
+/* True for admin/director (see everything) and for a tech manager or
+   vessel manager whose fleet includes this vessel name; false only
+   narrows their own view down to their assigned ship(s). A tech manager's
+   fleet is usually several vessels, a vessel manager's usually just one
+   or two, but both are stored and checked the same way. */
 function vesselAllowedForRole(vesselName){
-  if(effectiveRole().type!=='techManager') return true;
+  var t = effectiveRole().type;
+  if(t!=='techManager' && t!=='vesselManager') return true;
   var n = (vesselName||'').trim().toLowerCase();
   return (effectiveRole().fleet||[]).some(function(f){ return (f||'').trim().toLowerCase()===n; });
 }
@@ -6322,7 +6418,8 @@ function vesselAllowedForRole(vesselName){
    caller return a placeholder — navigate() triggers its own render
    immediately after, so the placeholder is on screen only briefly. */
 function guardVesselAccess(vesselName){
-  if(effectiveRole().type==='techManager' && !vesselAllowedForRole(vesselName)){
+  var t = effectiveRole().type;
+  if((t==='techManager' || t==='vesselManager') && !vesselAllowedForRole(vesselName)){
     toast("You don't have access to that vessel");
     navigate('home');
     return false;
