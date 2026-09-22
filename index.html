@@ -269,9 +269,10 @@ input, textarea, .qtext, .fq, .frem, .remarks-wrap, .pr-freetext, .pr-q{
 .field .req{color:var(--bad);}
 .field input[type=text],
 .field input[type=date],
-.field select{
+.field select,
+.field textarea{
   width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);
-  background:#fff;font-size:15px;color:var(--ink);
+  background:#fff;font-size:15px;color:var(--ink);font-family:inherit;resize:vertical;
 }
 .field input:focus,.field select:focus,.field textarea:focus{outline:2px solid var(--accent);outline-offset:1px;}
 .form-actions{display:flex;gap:10px;margin-top:6px;}
@@ -340,6 +341,20 @@ input, textarea, .qtext, .fq, .frem, .remarks-wrap, .pr-freetext, .pr-q{
 .section-row .badge.partial{background:var(--warn-tint);color:var(--warn);}
 .chev{flex:none;color:var(--faint);width:16px;height:16px;}
 .custom-tag{font-size:10px;font-weight:700;color:var(--accent-dark);background:var(--accent-tint);padding:3px 6px;border-radius:4px;flex:none;}
+
+/* ---------- Manage checklist (drag-reorderable rows) ---------- */
+.manage-row{
+  display:flex;align-items:center;gap:4px;
+  margin:0 16px 8px;padding:6px 6px 6px 2px;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+}
+.grip-handle{flex:none;width:34px;height:34px;display:flex;align-items:center;justify-content:center;color:var(--faint);background:none;border:none;touch-action:none;cursor:grab;}
+.grip-handle svg{width:18px;height:18px;}
+.manage-row-body{flex:1;min-width:0;text-align:left;background:none;border:none;padding:6px 4px;cursor:pointer;}
+.manage-row-title{font-size:14.5px;font-weight:600;color:var(--ink);overflow-wrap:anywhere;}
+.manage-row-sub{font-size:12px;color:var(--faint);margin-top:2px;}
+.reorder-dragging{box-shadow:0 6px 18px rgba(11,33,56,0.28);border-color:var(--accent);opacity:0.97;}
+.reorder-placeholder{margin:0 16px 8px;border-radius:var(--radius);border:2px dashed var(--accent);background:var(--accent-tint);}
 
 .report-fab{
   position:sticky;bottom:0;left:0;right:0;
@@ -644,11 +659,71 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 
 /* =====================================================================
    DATA — checklist sections & questions (from the vessel inspection
-   checklist). Each section: {sr, zone, name, q:[[ref, questionText], ...]}
+   checklist). Each section: {sr, zone, name, q:[[ref, questionText, qId], ...], nextQid}
+   sr is a PERMANENT, never-reused identifier for a section — not its
+   display position (that's wherever the section currently sits in the
+   SECTIONS array, which the checklist-management screen lets an admin
+   reorder). Likewise each question's 3rd array element, qId, is a
+   permanent, never-reused identifier for that question WITHIN its
+   section — not its position in q[]. Every already-recorded inspection
+   answer is keyed by inspectionId+sr+qId (see responseKey/extrasKey
+   below), so these two ids are what keeps an existing answer attached
+   to the right question even after sections/questions are renamed,
+   reordered, or new ones are inserted around them.
+   DEFAULT_SECTIONS is the checklist exactly as it always shipped —
+   every id below is simply that original array position, frozen in
+   place, so nothing already saved anywhere needs to change. SECTIONS
+   (right below) is the LIVE, possibly admin-edited copy actually used
+   everywhere else in the app; it starts as a copy of DEFAULT_SECTIONS
+   and is overwritten with a saved template (if any) during boot — see
+   loadSectionsTemplate() and INIT at the bottom of this file.
    ===================================================================== */
-var SECTIONS = [{"sr":1,"zone":"OUTSIDE","name":"External Hull","q":[["H-1","HULL SHELL PLATING: Examine external condition of topside, boot-top, flat bottom and bulbous bow. Check for corrosion, deformation, cracks, coating breakdown and weld defects."],["H-2","HULL FOULING: Assess marine growth on boot-top and flat bottom. Check antifouling validity and performance degradation evidence."],["H-3","HULL MARKINGS: Verify draft marks (FWD/AFT/midship), load line marks, ship's name, IMO number and port of registry legible and correctly positioned."]]},{"sr":2,"zone":"OUTSIDE","name":"Boarding Point","q":[["SA-1","PILOT BOARDING ARRANGEMENT: Verify pilot ladder, accommodation ladder and combination ladder comply with SOLAS. Check rigging, lighting, lifebuoy and heaving line."],["SA-2","PILOT LADDER CERTIFICATION: Check for approval stamp/marking confirming current SOLAS compliance. Verify steps not painted, ropes not spliced mid-length."],["SA-3","SAFETY CHAINS: Inspect chains at all ship-side openings. Verify properly tensioned (not loose), hooks/shackles secure."],["SA-4","ACCOMMODATION LADDER/GANGWAY: Check stanchion pockets, supporting wires/chains, platform security and non-slip treads."]]},{"sr":3,"zone":"OUTSIDE","name":"Aft Station","q":[["H-7","EMERGENCY TOWING (ETA): Verify forward and aft towing arrangements rigged, marked and ready for immediate deployment without power."],["D-2","MOORING ARRANGEMENTS: Examine fairleads, bollards, bitts, winches and mooring lines FWD and AFT. Check SWL markings, line condition and snap-back zones."],["DM-6","MOORING WINCH BRAKE TEST: Verify brake rendering test per MSC.1/Circ.1175/Rev.1. Check test records showing brake holds at 60% MBL."]]},{"sr":4,"zone":"OUTSIDE","name":"External Accommodation Structure","q":[["AS-4","Check superstructure external condition, weathertight doors, windows, ventilation openings, access ladders and verify watertight/weathertight integrity maintained."],["AS-8","Inspect external accommodation ladders and platforms for structural security, non-slip surfaces, and safe access to deck levels."],["FF-11","Confirm fire control plan posted outside accommodation in weathertight enclosure as required by SOLAS II-2/15.2.4."]]},{"sr":5,"zone":"OUTSIDE","name":"Main Deck","q":[["D-1","MAIN DECK STRUCTURE: Walk the deck checking plating, hatch coamings, piping, cable trays and penetrations for condition and watertight integrity."],["D-3","DECK OPENINGS: Inspect manholes, ventilators, air pipes, access hatches and scuttles for watertight/weathertight closure and gasket condition."],["D-4","DECK CRANES: Inspect structure, slewing mechanism, wire ropes, safety limiters, controls and operator cabin. Check test certificates."],["D-8","BULWARKS & GUARDRAILS: Inspect for structural integrity, adequate height (1m minimum) and freeing port operation. Check safety barriers."],["DM-2","DECK CRANE STRUCTURE: Inspect pedestal, jib, wire ropes and sheaves. Check slewing ring bolts and any structural cracking or corrosion."],["DM-3","CRANE HOOKS & LIFTING GEAR: Examine hooks, blocks, grabs and lifting accessories. Check safety latches, SWL markings and wear limits."],["EM-5","Check shore power connection arrangements, verify international connection available, cable routing safe, and changeover procedures understood."]]},{"sr":6,"zone":"OUTSIDE","name":"Deck Lines","q":[["D-1","MAIN DECK STRUCTURE: Walk the deck checking plating, hatch coamings, piping, cable trays and penetrations for condition and watertight integrity."]]},{"sr":7,"zone":"OUTSIDE","name":"Deck Workshop","q":[["PW-3","Check deck workshop equipment including machine tools, welding equipment, portable power tools for guards, emergency stops, electrical safety and adequate PPE availability."],["PW-4","Inspect portable lifting equipment including chain blocks, tirfors, slings, shackles for condition, SWL markings, current inspection tags and proper storage."]]},{"sr":8,"zone":"OUTSIDE","name":"Oxygen-Acetylene Room","q":[["PW-2","Examine oxygen and acetylene cylinder storage for proper segregation, securing, flashback arrestors and pressure regulators in good condition."]]},{"sr":9,"zone":"OUTSIDE","name":"Paint Room / Bunker Sampling Room","q":[["PW-1","Inspect paint store for fire safety compliance including ventilation, fire detection/suppression, electrical safety (Ex-proof), storage arrangements and MSDS availability."],["ADD-BS1","BUNKER SAMPLING ROOM/POINT: Verify continuous drip sampler is correctly installed and operational at the bunker manifold, confirm retained MARPOL fuel samples (current and previous bunkers) are correctly labelled, sealed and stored for the required retention period, and confirm the sampling point is readily accessible."],["ADD-PR-MSDS","MSDS/SDS AVAILABILITY: Confirm Material Safety Data Sheets (MSDS/SDS) for all paints, thinners and chemicals stored in the paint room are available, current and readily accessible."],["ADD-PR-BDN","BDN & FUEL SAMPLE INVENTORY: Verify Bunker Delivery Notes (BDNs) are retained on board and cross-checked against retained MARPOL Annex VI fuel samples; confirm the sample inventory register is up to date and samples are correctly labelled and sealed."],["ADD-PR-SPKR","FIXED SPRINKLER/WATER SPRAY SYSTEM: Test the fixed sprinkler/water spray fire protection system for the paint room — verify system pressurised, nozzles unobstructed, remote/local activation functional, and system logged on the fire control plan."]]},{"sr":10,"zone":"OUTSIDE","name":"Garbage Area","q":[["PP-7","Check garbage management including proper segregation, Garbage Record Book entries accurate, disposal receipts retained, and placards posted per MARPOL."]]},{"sr":11,"zone":"OUTSIDE","name":"Midship Store","q":[["ADD-MS1","MIDSHIP STORE — GENERAL CONDITION: Verify general condition of the midship deck store — housekeeping, correct stowage/identification of stores, lighting and ventilation adequate. Inspect the adjacent hydraulic power pack room (hatch cover hydraulics) for oil leaks, correct pressure gauge readings and general condition."]]},{"sr":12,"zone":"OUTSIDE","name":"Bunker Manifold","q":[["ADD-BM1","BUNKER MANIFOLD: Inspect bunker manifold valves, connections and reducers for condition and correct blanking (spectacle flanges/blank flanges fitted when not in use). Confirm drip trays/save-alls are in place, scupper plugs are available and fitted, bunker hoses/hard arms in good condition, and manifold communication/signage (P&A Manual, isolation valve) satisfactory."]]},{"sr":13,"zone":"OUTSIDE","name":"SOPEP Locker","q":[["D-5","SOPEP EQUIPMENT: Verify equipment complete per plan and accessible. Check bunker station containment, scupper plugs and crew familiarity."]]},{"sr":14,"zone":"OUTSIDE","name":"Chemical Locker","q":[["PW-5","Verify MSDS/SDS available for all chemicals in paint store and deck stores, crew aware of hazards, and appropriate PPE available."]]},{"sr":15,"zone":"OUTSIDE","name":"Cargo Hold and Hatch Covers","q":[["D-6","HATCH COVERS: Inspect panels, compression bars, cleating, gaskets and cross-joint drains. Verify hose test records and weathertight integrity."],["DM-5","HATCH COVER HYDRAULICS: Inspect power pack, piping, hoses, cylinders and control panels. Test operation and check for leaks."],["CS-1","Inspect cargo hold structural condition including tank top, hopper tanks, topside tanks, transverse bulkheads, frames and coating condition for vessels carrying corrosive cargoes."],["CS-2","Test cargo hold bilge pumping system and water ingress detection alarms (WIDAS) to verify all holds can be pumped and water level alarms function at both alert levels."],["CS-4","Inspect cargo hold ventilation system including fans, ducting, closing arrangements, booby hatches and fire dampers for operational condition and ability to close for firefighting."],["CS-9","Inspect cargo hold electrical equipment condition, gas sampling points accessibility, and verify compliance with IMSBC Code for current cargo type."]]},{"sr":16,"zone":"OUTSIDE","name":"Bunker, Ballast and Fresh Water Tanks","q":[["BF-1","Inspect ballast tank internal structure and coating condition, assess corrosion level, check anodes/ICCP system, and verify tanks suitable for continued service."],["BF-3","Check fresh water tanks for structural condition, coating integrity, cross-contamination prevention, treatment system operation and water quality testing records."],["BF-5","Inspect tank access arrangements, enclosed space entry procedures, atmosphere testing equipment, rescue equipment and verify enclosed space rescue drill records current."]]},{"sr":17,"zone":"OUTSIDE","name":"Ballast/Fuel/Fresh Water Tank","q":[["BF-2","Examine fuel oil tanks including structural condition, heating coils, sounding/gauging arrangements, high level alarms and overflow containment."]]},{"sr":18,"zone":"OUTSIDE","name":"Ballast Water Management","q":[["BF-4","Verify ballast water management system (BWMS) is operational, type-approved, crew trained, and Ballast Water Record Book properly maintained for D-2 compliance."],["PP-9","Inspect ballast water management including BWMS operation, Ballast Water Record Book entries complete and accurate, and D-2 compliance demonstrated."],["ADD-BWM1","BALLAST WATER MANAGEMENT SYSTEM (BWMS) OPERATION: Verify the BWMS (filter unit + UV/electrolysis/chemical treatment unit) is operational, control panel free of unresolved alarms, and crew are familiar with startup/shutdown and manual override procedures."],["ADD-BWM2","BALLAST WATER RECORD BOOK & D-2 COMPLIANCE: Check the Ballast Water Record Book is up to date and correctly filled, the BWM Certificate / D-2 compliance documentation is valid, and ballast water reporting forms are completed prior to port arrival."]]},{"sr":19,"zone":"OUTSIDE","name":"Forward Station","q":[["H-4","ANCHORING EQUIPMENT: Inspect anchors, cables, windlass, chain stoppers and hawse pipes. Test windlass operation and verify anchor securing."],["H-5","CHAIN LOCKER & FORECASTLE: Enter and inspect for structural condition, ventilation, drainage, lighting and cleanliness."],["H-6","BOW THRUSTER COMPARTMENT: Inspect machinery, hydraulic/electric systems, ventilation and emergency stops. Check maintenance records."],["H-7","EMERGENCY TOWING (ETA): Verify forward and aft towing arrangements rigged, marked and ready for immediate deployment without power."],["D-2","MOORING ARRANGEMENTS: Examine fairleads, bollards, bitts, winches and mooring lines FWD and AFT. Check SWL markings, line condition and snap-back zones."],["DM-1","WINDLASS & MOORING WINCHES: Test operation, brake effectiveness, clutch mechanism and controls. Check hydraulics for leaks and emergency stops."],["DM-6","MOORING WINCH BRAKE TEST: Verify brake rendering test per MSC.1/Circ.1175/Rev.1. Check test records showing brake holds at 60% MBL."]]},{"sr":20,"zone":"OUTSIDE","name":"Forward Store","q":[["ADD-FS1","FORWARD STORE (BOSUN STORE) — GENERAL CONDITION: Verify general condition of the forward/bosun store — correct stowage and identification of ropes, paints, tools and deck stores, housekeeping satisfactory, lighting and ventilation adequate, and access ladder/hatch in safe condition."],["ADD-FS2","HYDRAULIC POWER PACK (FORWARD): Inspect the forward hydraulic power pack (windlass/mooring winch hydraulics) located in the forward store — check for oil leaks, correct oil level, pressure gauge readings and general condition."],["ADD-FS3","DEWATERING SYSTEM (FORWARD STORE): Verify the dewatering/bilge pumping arrangement for the forward store/forepeak area is operational — pump condition, suction valves clear, and bilge level alarm (if fitted) functioning."],["ADD-FS4","BITTER END OF ANCHOR CABLE: Locate and inspect the bitter end of the anchor cable release mechanism, stowed in the forward store — confirm it is accessible, free of paint/corrosion build-up, and can be readily released from outside the chain locker in an emergency."],["ADD-FS5","IMMERSION SUITS & LIFEJACKETS (FORWARD STORE): Confirm the 2 immersion suits and 5 lifejackets stowed in the forward store are present, in good condition, within service/inspection date, correctly sized/marked and readily accessible."]]},{"sr":21,"zone":"OUTSIDE","name":"Life Boat Station","q":[["LS-1","Inspect lifeboat hull, equipment, engine operation, release mechanism (LRRS), and verify fall prevention device certificate current and crew competent in launching."],["LS-2","Verify lifeboat inventory complete per SOLAS including pyrotechnics within validity, provisions not expired, first aid kit complete, and all required equipment present and serviceable."],["LS-3","Examine lifeboat launching appliances including davits, blocks, falls, winch brakes, and verify falls renewed within 5 years and thorough examination current."],["LS-6","Verify lifebuoy quantity and distribution correct, self-igniting lights and smoke signals within validity, buoyant lines adequate, and MOB markers operational."],["LS-7","Check lifejackets quantity for all persons plus extras, SI-lights attached and valid, immersion suits (where required) tested, and stowage locations clearly marked."],["LS-9","Inspect LSA stowage locations marked with IMO symbols, muster list posted, abandon ship procedures understood, and weekly/monthly LSA checks recorded."],["LS-10","Verify lifeboat wire lifting slings accessible for inspection (not covered in plastic sheathing) and condition can be assessed per SOLAS III/20.3.1."],["LS-11","Confirm lifeboat waterborne and maneuvered within last 3 months with video evidence and date confirmation as per SOLAS III/19."],["LS-13","Inspect overside lights at lifeboat stations to verify operational for night-time abandon ship operations."],["LS-14","Verify embarkation ladder side ropes in good condition (not rotten in way of thimbles) and all components meet requirements."]]},{"sr":22,"zone":"OUTSIDE","name":"Rescue Boat and Life Raft Station","q":[["LS-4","Test rescue boat condition, engine operation, verify inventory complete, launching appliance functional, and crew can demonstrate launching and recovery."],["LS-5","Inspect liferafts including container condition, HRU validity (typically 2 years), painter properly secured, service date within 12 months, and stowage complies with SOLAS."]]},{"sr":23,"zone":"OUTSIDE","name":"Bridge Wings","q":[["ADD-BW1","MOB MARKER/POLE: Confirm the Man Overboard (MOB) marker/pole and self-igniting light/smoke signal are stowed correctly on the bridge wing, in immediate ready condition for release."],["ADD-BW2","RPM & RUDDER ANGLE INDICATOR: Confirm the RPM indicator and rudder angle indicator repeaters on the bridge wing are functioning correctly and readings match the wheelhouse instruments."],["ADD-BW3","BRIDGE WING EMERGENCY LIGHTING: Confirm emergency lighting on the bridge wing is provided and functioning correctly."],["ADD-BW4","BRIDGE WING DOORS: Inspect bridge wing access doors for condition, weathertightness, gasket condition and ease of operation."]]},{"sr":24,"zone":"OUTSIDE","name":"Monkey Island","q":[["D-7","MAST & NAVIGATION LIGHTS: Check mast structure, stays and all navigation lights including emergency. Test fog signal and verify spare bulbs."],["RN-9","Check navigation lights, day signals, sound signals including main and emergency lights functional, spare bulbs available, and all signals comply with COLREGS."],["ADD-MI1","VDR CAPSULE: Inspect the float-free VDR/S-VDR capsule for physical damage and secure mounting, confirm the hydrostatic release unit is within its service/expiry date, and verify the capsule is free to float clear in an emergency."],["ADD-MI2","MAGNETIC COMPASS: Inspect the standard/standby magnetic compass, binnacle and azimuth mirror for condition, and confirm the deviation/correction card is current and legible."],["ADD-MI3","X'MAS TREE (MAST) STRUCTURE: Inspect the mast (X'mas tree) structure, ladder/steps, platform and fittings for corrosion, cracks and secure mounting of navigation/signal lights and antennas. Stay wires supporting the mast must NOT be coated, taped or covered -- they are to be left bare so wire strands and corrosion can be visually verified."],["ADD-MI4","NAVIGATION LIGHTS: Test all navigation lights (masthead, side, stern, all-round) for correct operation and correct colour, and confirm spare bulbs/lamps and the navigation light failure alarm are available and functioning."],["ADD-MI5","MONKEY ISLAND VENTILATORS: Inspect ventilator heads/mushrooms on Monkey Island for corrosion, secure closing arrangements and effective closing mechanism."],["ADD-MI6","ANTENNA MARKING & CONDITION: Confirm all antennas (GPS, VHF, Inmarsat, AIS, etc.) are correctly marked/identified, securely mounted, with cabling properly secured and protected."]]},{"sr":25,"zone":"INSIDE","name":"Gym","q":[["ADD-GY1","GYM EQUIPMENT & FACILITY: Confirm all gym equipment is properly secured against the ship's motion and is in good working condition; confirm lighting and the attached toilet facility (if fitted) are in working order."]]},{"sr":26,"zone":"INSIDE","name":"AC Room","q":[["AS-11","AIR CONDITIONING & PROVISION ROOMS: Verify AC/refrigeration system functioning. Check accommodation temperature maintained. Inspect provision room temperature (fridge <5°C, freezer <-18°C), anti-skid flooring, manual call alarm, door handle and emergency door release arrangement."]]},{"sr":27,"zone":"INSIDE","name":"Hospital","q":[["AS-6","Verify hospital/sick bay meets requirements, medicines within validity, medical equipment functional, and medical chest maintained per flag state requirements."],["AS-9","Verify arrangements for medical care on board including medicine chest complete, medical officer designated, and communication for shore medical advice available."]]},{"sr":28,"zone":"INSIDE","name":"Fire Control Station","q":[["AS-5","Inspect ventilation and fire damper systems throughout accommodation and machinery spaces to verify dampers operate correctly and can be closed for fire containment."],["CS-3","Verify cargo hold fixed fire extinguishing system (CO2) including cylinder room condition, piping, release mechanisms, nozzles and confirm system operational and ready for use."],["FF-1","Test fire detection and alarm system including detector response, zone identification, alarm audibility, and verify no zones isolated without valid reason documented."],["FF-3","Inspect fire control station equipment including fire plan, quick-closing valve cabinet (with air pressure), emergency stops, pump controls, and communication equipment."],["FF-4","Test fire main system including all hydrants, verify adequate pressure at most remote hydrant with pump running, isolation valves operational, and relief valves set correctly."],["FF-5","Inspect fire hoses and nozzles at all stations, verify pressure tested, correct nozzle type (jet/spray with shutoff), couplings compatible, and adequate spares available."],["FF-6","Verify fireman's outfit complete (2 sets, 4 for tankers), SCBA cylinders charged, spare cylinders adequate, SCBA compressor operational with air quality certificate current."],["FF-7","Check portable fire extinguishers for correct type and quantity per fire plan, service dates current, condition satisfactory, and crew know locations and operation."],["FF-8","Inspect EEBD (Emergency Escape Breathing Devices) for correct quantity, proper stowage per plan, within service life, and crew familiar with donning and operation."],["FF-9","Test fire dampers operation including fusible link type and remote closing dampers, verify damper indicators accurate, and fan emergency stops functional."]]},{"sr":29,"zone":"INSIDE","name":"Changing Lockers","q":[["ADD-CL1","CHANGING LOCKER — GENERAL CONDITION: Verify general condition of deck/engine changing lockers — lighting, ventilation, cleanliness, lockers and benches in good order, free of unauthorized storage."]]},{"sr":30,"zone":"INSIDE","name":"Tally Room","q":[["ADD-TR1","TALLY ROOM — GENERAL CONDITION: Verify general condition of the Tally Room / cargo watch office — lighting, cleanliness, furniture and equipment in good working order."]]},{"sr":31,"zone":"INSIDE","name":"Provision Store","q":[["AS-7","Verify fresh provisions adequate for voyage with quality satisfactory, and storage temperatures correct (fridge <5°C, freezer <-18°C)."]]},{"sr":32,"zone":"INSIDE","name":"Galley","q":[["AS-3","Examine galley and food storage areas for hygiene, food handling practices, cold room temperatures, equipment safety and verify food and drinking water safe for consumption."]]},{"sr":33,"zone":"INSIDE","name":"Mess Room","q":[["ADD-MR1","MESS ROOM — GENERAL CONDITION: Verify general condition of the crew/officers' mess room — lighting, furniture, cleanliness and hygiene satisfactory, notice boards up to date."]]},{"sr":34,"zone":"INSIDE","name":"Recreation Room","q":[["ADD-RR1","RECREATION ROOM — LIGHTING & GENERAL CONDITION: Verify lighting and general condition of the crew recreation room, including furniture, entertainment equipment and cleanliness."],["ADD-RR2","TRAINING MANUAL AVAILABILITY: Confirm onboard training manual(s)/materials are available and accessible to crew in the recreation room."]]},{"sr":35,"zone":"INSIDE","name":"Emergency Generator Room","q":[["EM-1","Test emergency generator operation including auto-start on blackout (within 45 seconds), verify fuel capacity (18 hours marked), both starting batteries functional."],["EM-3","Verify emergency switchboard supplies all required emergency services, test transitional power source, and confirm emergency lighting throughout vessel operational."],["EM-4","Inspect emergency generator starting batteries, charging system, verify batteries less than recommended replacement age and capacity test records available."],["EM-7","Confirm emergency generator fuel grade appropriate for ambient temperature with winter grade fuel if operating in cold climates."]]},{"sr":36,"zone":"INSIDE","name":"Crew Cabins","q":[["AS-2","Inspect crew accommodation including cabins, messrooms, recreation spaces for MLC compliance covering living standards, ventilation, lighting, sanitary facilities and pest control."]]},{"sr":37,"zone":"INSIDE","name":"Laundry Room","q":[["ADD-LR1","LAUNDRY ROOM — GENERAL CONDITION: Verify general condition of the laundry room — washing/drying machines in working order, lighting and ventilation adequate, drainage free, area clean and free of trip/fire hazards (lint accumulation, stowage of chemicals)."]]},{"sr":38,"zone":"INSIDE","name":"Common Toilet","q":[["ADD-CT1","COMMON TOILET — GENERAL CONDITION: Verify general condition of common toilets — fixtures in working order, adequate lighting and ventilation, free of leaks, clean and hygienic."]]},{"sr":39,"zone":"INSIDE","name":"Alleyways","q":[["AS-1","Verify all fire doors in accommodation are self-closing, not held open by unauthorized means, seals and hardware intact, and remote release (where fitted) functional."]]},{"sr":40,"zone":"INSIDE","name":"Elevator","q":[["EL-1","Verify elevator annual service completed by approved contractor, certificate current, deficiencies rectified, and emergency procedures posted."],["EL-2","Test elevator safety devices including emergency stop, door interlocks, overload protection, emergency lighting and communication, and manual rescue capability."],["EL-3","Inspect elevator machine room condition, verify not used for storage, ventilation adequate, sheaves not greased (traction type), and fire extinguisher available."],["EL-4","Check elevator car condition, controls functional, floor leveling accurate, emergency lighting and communication operational in car."],["EL-5","Verify elevator safety notices posted including bad weather restrictions, fire evacuation procedures, and maximum capacity clearly displayed."]]},{"sr":41,"zone":"INSIDE","name":"Bridge","q":[["RN-1","Test GMDSS equipment including VHF DSC, MF/HF DSC, Inmarsat-C, EPIRB, SART and NAVTEX to verify all operational, tested and batteries/HRU within validity."],["RN-2","Verify radar systems (X-band and S-band) fully operational including performance monitor test, ARPA/target tracking, heading/speed inputs and integration with navigation systems."],["RN-3","Examine ECDIS system including ENC database validity, backup arrangements, alarm settings, chart updates, and verify officers hold type-specific training certificates."],["RN-4","Test steering gear including main, auxiliary and emergency steering systems, verify alarms and indicators, and confirm emergency steering drill records current (minimum 3-monthly)."],["RN-5","Verify VDR/S-VDR is recording without faults, annual performance test current, data can be downloaded, and bridge team familiar with emergency data preservation."],["RN-6","Test Bridge Navigational Watch Alarm System (BNWAS) to verify alarms function through all stages including bridge, backup locations, and system cannot be easily defeated."],["RN-7","Examine magnetic compass, gyro compass and GPS receivers to verify accuracy, compare headings, confirm deviation card current, and backup navigation means available."],["RN-8","Verify AIS operational and correctly configured with vessel particulars, navigational status current, and SSAS/LRIT systems (where fitted) tested and functional."],["RN-10","Inspect echo sounder, speed log, course recorder, autopilot and other navigation aids to verify operational and providing accurate data with alarms functional."],["RN-11","Test GMDSS equipment operation on reserve power (batteries) to verify functionality during main power failure as required by SOLAS."],["RN-12","Verify GMDSS MSI (Maritime Safety Information) reception correctly configured for vessel's area of operation including NAVTEX stations and SafetyNET."],["RN-13","Confirm BNWAS reset switch location requires physical movement to watchkeeping position - not accessible from chart room or behind curtains."],["RN-14","Review compass error records to verify errors obtained at least once per watch and recorded as per STCW requirements."],["RN-16","Inspect portable VHF radios for quantity, battery condition, charging status and verify operational for use in emergencies and cargo operations."],["LS-8","Verify line-throwing apparatus available with rockets within validity, distress signals (parachute rockets, hand flares) adequate and within validity, properly stowed."]]},{"sr":42,"zone":"INSIDE","name":"Battery Room","q":[["AS-10","Inspect battery room for adequate ventilation, no hydrogen accumulation risk, battery condition satisfactory and charging system functional."]]},{"sr":43,"zone":"INSIDE","name":"Cargo Control Room","q":[["H-8","REMOTE DRAFT GAUGES: Test FWD and AFT draft indicators for operation and accuracy. Compare with manual measurement."],["CS-5","Examine cargo control room equipment (where fitted) including tank level gauging, valve remote control, cargo pump monitoring and verify instrumentation operational and calibrated."],["CS-6","Check portable gas detection equipment including multi-gas detectors, O2 analyzers, calibration status and verify spare sensors available and crew competent in operation."],["CS-8","Test loading instrument/computer and verify loading booklet available with approved loading conditions, and evidence of monitoring during cargo operations."],["CS-10","Verify cargo monitoring equipment operational including oxygen analyzer, combustible gas indicator, pH meter and temperature measuring devices where required."]]},{"sr":44,"zone":"INSIDE","name":"Cargo Documents","q":[["DM-4","LIFTING GEAR CERTIFICATION: Review Register of Lifting Appliances, annual inspections, load test certificates and wire certificates."],["CS-7","Verify shipper's declaration for bulk cargo on board with cargo information including transportable moisture limit, moisture content, angle of repose and any special hazards."],["CS-8","Test loading instrument/computer and verify loading booklet available with approved loading conditions, and evidence of monitoring during cargo operations."]]},{"sr":45,"zone":"INSIDE","name":"Bridge Documents","q":[["LS-12","Verify SOLAS training manual is ship-specific with vessel's actual procedures for survival craft launching including freefall simulation if applicable."]]},{"sr":46,"zone":"INSIDE","name":"MLC / QHSC","q":[["MQ-1","Review work and rest hours records for compliance with MLC/STCW requirements, verify records consistent, and no evidence of excessive working hours."],["MQ-2","Verify ISM implementation including safety policy displayed, crew awareness of responsibilities, defect reporting functioning, and audit findings closed out."],["MQ-3","Assess risk assessment and permit to work system effectiveness, sample recent permits for quality, and verify crew competent in conducting risk assessments."],["MQ-4","Verify crew certifications valid for positions held, familiarization completed within 24 hours of joining, and watchkeeping arrangements comply with STCW."],["MQ-5","Check crew welfare provisions including recreational facilities, communication with home, mess and catering quality, and verify no outstanding MLC complaints."],["MQ-6","Verify drug and alcohol policy implementation, testing equipment calibrated, records maintained, and crew understand consequences of non-compliance."],["MQ-7","Review safety meeting records, SAIL/near-miss reporting, and verify crew participation in safety culture with evidence of stop-work authority being respected."],["MQ-8","Inspect PPE usage and availability, verify correct PPE for tasks observed, and confirm PPE inspection and replacement system in place."],["MQ-9","Verify watchkeeping schedule poster accurately reflects actual arrangement and is posted in easily accessible location as per STCW."],["MQ-10","Confirm watchkeepers on first watch after port departure are sufficiently rested per STCW requirements (10 hours rest in 24 hours prior)."],["MQ-11","Verify ship owner's liability insurance (P&I) in place for seafarer claims including repatriation and compensation."],["MQ-12","Evidence of Master's review of ISM system conducted with documented findings and company follow-up on identified issues."],["MQ-13","Verify potable water quality testing conducted with records maintained, and no E. Coli or coliform contamination detected."]]},{"sr":47,"zone":"INSIDE","name":"Crew Interaction","q":[["CI-1","Assess management team competency through discussion covering vessel systems knowledge, emergency response capability, and familiarity with company procedures."],["CI-2","Interact with crew members to assess morale, identify any grievances, verify complaint procedures known, and check communication effectiveness. Conduct meeting with max available crew for good interaction."],["CI-3","Verify new crew familiarization completed properly, on-board training conducted, and cadet/trainee programs (if applicable) being implemented."],["CI-4","Review crew contracts and employment conditions, verify MLC compliance including wages, leave, repatriation provisions, and seafarer employment agreements available."],["CI-5","Conduct officer appraisals as appropriate, document performance observations, and identify any training or development needs."],["CI-6","Verify wage payment records show timely payment in accordance with employment agreement and allotment arrangements functioning.Confirm leave entitlement records maintained showing accrual and usage in accordance with employment agreement."]]},{"sr":48,"zone":"INSIDE","name":"PMS","q":[["PM-1","Verify Planned Maintenance System is operational and current, overdue jobs identified and managed with justification, and system reflects actual vessel condition."],["PM-2","Review main engine and Generator Engine maintenance records including running hours, wear data, safety device tests, and verify maintenance aligned with manufacturer recommendations and Class requirements."],["PM-3","Check critical spare parts inventory against Class-required list, verify availability of key items for main propulsion and essential systems."],["PM-4","Review Class survey status including continuous machinery survey (CMS), outstanding recommendations, conditions of class, and verify upcoming surveys planned."],["PM-5","Check external analysis records for lubricating oil (main engine, generators, stern tube) and fuel oil, verify recommendations implemented."],["PM-6","Verify deck equipment maintenance including mooring winch brake tests, crane inspections, hatch cover maintenance, and LSA/FFA servicing current."],["PM-7","Verify Enhanced Survey Programme (ESP) records available for bulk carriers/tankers with close-up survey and thickness measurement records accessible."]]},{"sr":49,"zone":"INSIDE","name":"Security","q":[["SE-1","Verify Ship Security Plan implementation, security equipment operational, crew trained and drilled, and ISSC certificate valid with no outstanding security deficiencies."],["SE-2","Test SSAS including activation points, verify covert activation possible, and confirm test communication with CSO and flag Administration current."],["SE-3","Check access control procedures including gangway watch, visitor management, ID verification, and restricted area protection at current security level."],["SE-4","Verify CSO contact details current, communication procedures for security incidents understood, and security level changes documented and actioned."],["SE-5","Inspect anti-piracy/citadel arrangements (where applicable for trade), verify crew trained, communications pre-positioned, and hardening measures available."],["SE-6","Verify security sweep procedures understood for searching vessel prior to departure from port with records of sweeps conducted."]]},{"sr":50,"zone":"INSIDE","name":"Energy Management","q":[["EN-1","Review SEEMP Part I, Part II (CII) and Part III, verify vessel is monitoring CII performance, and energy efficiency measures are being implemented."],["EN-2","Check fuel saving measures being implemented including generator optimization, steam system efficiency, auxiliary equipment management, and shore power use where available."],["EN-3","Verify hull and propeller condition monitoring including cleaning records, performance analysis, and voyage optimization practices being followed."],["EN-4","Review FuelEU Maritime compliance (for EU trading vessels) including GHG intensity monitoring, pooling agreements if applicable, and penalty avoidance measures."],["EN-5","Review evidence of voyage optimization measures including weather routing, speed optimization, and trim optimization being practiced."]]},{"sr":51,"zone":"ENGINE ROOM","name":"Engine Control Room","q":[["ER-6","Examine main switchboard and electrical distribution including protection, insulation, earth fault indication, and verify LOTO procedures implemented with insulation mats in place."],["ER-7","Inspect engine control room equipment, alarm/monitoring systems, UMS changeover, data logger and verify engineer officer familiar with alarm acknowledgment procedures."],["ER-13","Verify no electrical fuses bypassed or temporary wiring fitted, and all electrical protection devices intact and functional."]]},{"sr":52,"zone":"ENGINE ROOM","name":"Electrical Workshop","q":[["ADD-EW1","ELECTRICAL WORKSHOP — GENERAL CONDITION: Verify general condition of the electrical workshop — test equipment calibrated and in date, tools stowed correctly, lighting adequate, housekeeping satisfactory and free of fire hazards."]]},{"sr":53,"zone":"ENGINE ROOM","name":"Workshop","q":[["ER-11","Examine E/R workshop, machine tools safety, overhead crane/lifting gear, and verify load test certificates current and electrical safety measures in place."]]},{"sr":54,"zone":"ENGINE ROOM","name":"Engine Store Room","q":[["ADD-ES1","ENGINE ROOM STORES — GENERAL CONDITION: Verify general condition of engine room store room(s) — spares correctly stowed, identified and secured, housekeeping satisfactory, lighting adequate, free of fire/trip hazards."]]},{"sr":55,"zone":"ENGINE ROOM","name":"Auxiliary Engine","q":[["ER-2","Examine generator engines condition, fuel oil pipe protection, crankcase protection, and verify all generators can carry rated load with automatic changeover functional."]]},{"sr":56,"zone":"ENGINE ROOM","name":"Purifier Room","q":[["ER-4","Inspect fuel oil and lubricating oil systems including purifiers, pumps, filters, heating, verify MARPOL FN tape fitted on flanges and recent oil analysis satisfactory."]]},{"sr":57,"zone":"ENGINE ROOM","name":"Sewage Plant","q":[["PP-6","Verify sewage treatment plant operational, effluent quality satisfactory, holding tank arrangements adequate, and discharge records maintained."],["PP-11","Verify sewage treatment plant operated in accordance with manufacturer's instructions with evidence of correct operation sequence and effluent quality."],["PP-12","Confirm no unauthorized collection or bypass arrangements for sewage that could allow untreated discharge."]]},{"sr":58,"zone":"ENGINE ROOM","name":"Main Engine","q":[["ER-1","Inspect main engine condition including operational capability, fuel oil system integrity (jacketing), crankcase oil mist detector, governors and verify no significant leakages or defects."],["ER-12","Check stern tube and shaft sealing arrangement, verify no significant leakage, gravity/header tank level adequate, and temperature monitoring satisfactory."]]},{"sr":59,"zone":"ENGINE ROOM","name":"Compressors","q":[["ER-9","Check auxiliary machinery including air compressors, fresh water generator, cooling water systems, hydrophore and verify adequate capacity for vessel operations."]]},{"sr":60,"zone":"ENGINE ROOM","name":"Coolers","q":[["ER-9","Check auxiliary machinery including air compressors, fresh water generator, cooling water systems, hydrophore and verify adequate capacity for vessel operations."]]},{"sr":61,"zone":"ENGINE ROOM","name":"Fresh/Sea Water Pump","q":[["ER-15","SEA WATER PIPING: Inspect sea water cooling lines throughout engine room for condition. Check for corrosion, wastage, soft patches and temporary repairs. Verify no unauthorized repairs or cement boxes fitted."]]},{"sr":62,"zone":"ENGINE ROOM","name":"Oily Water Separator","q":[["PP-1","Test oily water separator and 15ppm monitor operation, verify OCM calibration current, alarm and automatic stopping device functional, and spares available."],["PP-4","Check sludge tank and bilge holding tank capacity adequate for voyage, pumping system operational, and disposal records properly maintained for 3 years."]]},{"sr":63,"zone":"ENGINE ROOM","name":"Incinerator","q":[["PP-5","Inspect incinerator operation, verify prohibited materials understood, service records current, and ash disposal properly recorded in Garbage Record Book."]]},{"sr":64,"zone":"ENGINE ROOM","name":"Bilge Suction","q":[["ER-8","Test bilge pumping system and emergency bilge suction, verify bilge wells accessible, high level alarms functional, and fire pumps achieve required pressure."],["ER-14","Test all bilge well high level alarms in machinery spaces and verify alarms received at manned location with correct space identification."]]},{"sr":65,"zone":"ENGINE ROOM","name":"Emergency/Direct Bilge Suction","q":[["ER-8","Test bilge pumping system and emergency bilge suction, verify bilge wells accessible, high level alarms functional, and fire pumps achieve required pressure."],["PP-3","Verify all MARPOL seals intact on emergency bilge systems, seal register current, no evidence of tampering, and crew aware of consequences."]]},{"sr":66,"zone":"ENGINE ROOM","name":"Engine Room Lines and Valves","q":[["FF-12","Test engine room fire main isolating valve to verify operational and accessible, allowing isolation for repairs while maintaining fire main to other spaces."]]},{"sr":67,"zone":"ENGINE ROOM","name":"Hypermist System","q":[["ADD-HM1","HYPERMIST SYSTEM — OPERATIONAL TEST: Confirm the Hypermist (local application water mist) fire-fighting system is maintained fully operational at all times. Test the system during the inspection — verify pump start, line pressure, nozzle coverage at protected machinery spaces, and control/alarm panel indications."]]},{"sr":68,"zone":"ENGINE ROOM","name":"Engine Room Misc.","q":[["ER-3","Test boiler and exhaust gas boiler safety systems including low water cutout, flame failure, pressure relief, and verify no leakages and water treatment maintained."],["ER-10","Inspect engine room general housekeeping, cleanliness, bilge condition, escape routes clear, and verify adequate PPE available and being used."],["FF-10","Verify fire hose lengths in engine room do not exceed 15 meters per SOLAS requirements to ensure effective firefighting capability."]]},{"sr":69,"zone":"ENGINE ROOM","name":"Steering Gear Room","q":[["ER-5","Test steering gear hydraulic system, verify emergency oil storage, check for leakages, and confirm emergency steering procedures posted and crew trained."],["RN-15","Verify emergency steering instructions posted at steering gear room and communication with wheelhouse tested and functional."]]},{"sr":70,"zone":"ENGINE ROOM","name":"Emergency Fire Pump","q":[["ER-8","Test bilge pumping system and emergency bilge suction, verify bilge wells accessible, high level alarms functional, and fire pumps achieve required pressure."],["EM-2","Test emergency fire pump operation including priming, discharge pressure at most remote hydrant, verify fuel capacity adequate and remote start functional."],["EM-6","Verify emergency fire pump has two independent means of access with neither secured from inside, and both access routes clearly marked."]]},{"sr":71,"zone":"ENGINE ROOM","name":"Foam Room","q":[["FF-2","Verify fixed fire extinguishing system (CO2/foam/water spray) operational including cylinder quantity, release mechanism, distribution piping, and pre-release alarms functional."]]},{"sr":72,"zone":"ENGINE ROOM","name":"Engine Room Blower","q":[["ADD-ERB1","ENGINE ROOM BLOWERS: Test engine room forced/induced draft blower fans for correct operation, check for abnormal noise/vibration, condition of fan blades and guards, and confirm remote stop arrangements are functional."]]},{"sr":73,"zone":"ENGINE ROOM","name":"Funnel Flap","q":[["ADD-FF1","FUNNEL FLAP: Test operation of the funnel flap/damper (open and close), confirm it operates smoothly through full travel and seats correctly, and verify remote/local control arrangement is functional."]]},{"sr":74,"zone":"ENGINE ROOM","name":"Funnel Top Side","q":[["ADD-FT1","FUNNEL TOP AREA: Inspect funnel top area — funnel/uptake casing structure, drain line, top plate/cap and spark arrestor (if fitted) for corrosion, damage and secure fitting."]]},{"sr":75,"zone":"ENGINE ROOM","name":"Engine Room Documents","q":[["PP-2","Review Oil Record Book Part I entries for accuracy, verify times match 15ppm recorder printout (UTC), quantities match soundings, and no evidence of improper entries."],["PP-8","Verify fuel oil BDNs retained for 3 years, MARPOL samples properly labeled and stored, sulphur content records accurate, and changeover procedures documented for ECAs."],["PP-10","Verify IOPP Certificate valid, ship complies with NOx Technical Code where applicable, and all MARPOL-related documentation current and accessible."],["PP-13","Confirm fuel sampling line arrangement for various machineries as per IMO requirement, fuel change over record and compliance, Annex VI compliance for ECA change over, Scrubber operation, EGCS operation and record keeping as applicable should be verified"]]}];
+var DEFAULT_SECTIONS = [{"sr":1,"zone":"OUTSIDE","name":"External Hull","q":[["H-1","HULL SHELL PLATING: Examine external condition of topside, boot-top, flat bottom and bulbous bow. Check for corrosion, deformation, cracks, coating breakdown and weld defects.",0],["H-2","HULL FOULING: Assess marine growth on boot-top and flat bottom. Check antifouling validity and performance degradation evidence.",1],["H-3","HULL MARKINGS: Verify draft marks (FWD/AFT/midship), load line marks, ship's name, IMO number and port of registry legible and correctly positioned.",2]],"nextQid":3},{"sr":2,"zone":"OUTSIDE","name":"Boarding Point","q":[["SA-1","PILOT BOARDING ARRANGEMENT: Verify pilot ladder, accommodation ladder and combination ladder comply with SOLAS. Check rigging, lighting, lifebuoy and heaving line.",0],["SA-2","PILOT LADDER CERTIFICATION: Check for approval stamp/marking confirming current SOLAS compliance. Verify steps not painted, ropes not spliced mid-length.",1],["SA-3","SAFETY CHAINS: Inspect chains at all ship-side openings. Verify properly tensioned (not loose), hooks/shackles secure.",2],["SA-4","ACCOMMODATION LADDER/GANGWAY: Check stanchion pockets, supporting wires/chains, platform security and non-slip treads.",3]],"nextQid":4},{"sr":3,"zone":"OUTSIDE","name":"Aft Station","q":[["H-7","EMERGENCY TOWING (ETA): Verify forward and aft towing arrangements rigged, marked and ready for immediate deployment without power.",0],["D-2","MOORING ARRANGEMENTS: Examine fairleads, bollards, bitts, winches and mooring lines FWD and AFT. Check SWL markings, line condition and snap-back zones.",1],["DM-6","MOORING WINCH BRAKE TEST: Verify brake rendering test per MSC.1/Circ.1175/Rev.1. Check test records showing brake holds at 60% MBL.",2]],"nextQid":3},{"sr":4,"zone":"OUTSIDE","name":"External Accommodation Structure","q":[["AS-4","Check superstructure external condition, weathertight doors, windows, ventilation openings, access ladders and verify watertight/weathertight integrity maintained.",0],["AS-8","Inspect external accommodation ladders and platforms for structural security, non-slip surfaces, and safe access to deck levels.",1],["FF-11","Confirm fire control plan posted outside accommodation in weathertight enclosure as required by SOLAS II-2/15.2.4.",2]],"nextQid":3},{"sr":5,"zone":"OUTSIDE","name":"Main Deck","q":[["D-1","MAIN DECK STRUCTURE: Walk the deck checking plating, hatch coamings, piping, cable trays and penetrations for condition and watertight integrity.",0],["D-3","DECK OPENINGS: Inspect manholes, ventilators, air pipes, access hatches and scuttles for watertight/weathertight closure and gasket condition.",1],["D-4","DECK CRANES: Inspect structure, slewing mechanism, wire ropes, safety limiters, controls and operator cabin. Check test certificates.",2],["D-8","BULWARKS & GUARDRAILS: Inspect for structural integrity, adequate height (1m minimum) and freeing port operation. Check safety barriers.",3],["DM-2","DECK CRANE STRUCTURE: Inspect pedestal, jib, wire ropes and sheaves. Check slewing ring bolts and any structural cracking or corrosion.",4],["DM-3","CRANE HOOKS & LIFTING GEAR: Examine hooks, blocks, grabs and lifting accessories. Check safety latches, SWL markings and wear limits.",5],["EM-5","Check shore power connection arrangements, verify international connection available, cable routing safe, and changeover procedures understood.",6]],"nextQid":7},{"sr":6,"zone":"OUTSIDE","name":"Deck Lines","q":[["D-1","MAIN DECK STRUCTURE: Walk the deck checking plating, hatch coamings, piping, cable trays and penetrations for condition and watertight integrity.",0]],"nextQid":1},{"sr":7,"zone":"OUTSIDE","name":"Deck Workshop","q":[["PW-3","Check deck workshop equipment including machine tools, welding equipment, portable power tools for guards, emergency stops, electrical safety and adequate PPE availability.",0],["PW-4","Inspect portable lifting equipment including chain blocks, tirfors, slings, shackles for condition, SWL markings, current inspection tags and proper storage.",1]],"nextQid":2},{"sr":8,"zone":"OUTSIDE","name":"Oxygen-Acetylene Room","q":[["PW-2","Examine oxygen and acetylene cylinder storage for proper segregation, securing, flashback arrestors and pressure regulators in good condition.",0]],"nextQid":1},{"sr":9,"zone":"OUTSIDE","name":"Paint Room / Bunker Sampling Room","q":[["PW-1","Inspect paint store for fire safety compliance including ventilation, fire detection/suppression, electrical safety (Ex-proof), storage arrangements and MSDS availability.",0],["ADD-BS1","BUNKER SAMPLING ROOM/POINT: Verify continuous drip sampler is correctly installed and operational at the bunker manifold, confirm retained MARPOL fuel samples (current and previous bunkers) are correctly labelled, sealed and stored for the required retention period, and confirm the sampling point is readily accessible.",1],["ADD-PR-MSDS","MSDS/SDS AVAILABILITY: Confirm Material Safety Data Sheets (MSDS/SDS) for all paints, thinners and chemicals stored in the paint room are available, current and readily accessible.",2],["ADD-PR-BDN","BDN & FUEL SAMPLE INVENTORY: Verify Bunker Delivery Notes (BDNs) are retained on board and cross-checked against retained MARPOL Annex VI fuel samples; confirm the sample inventory register is up to date and samples are correctly labelled and sealed.",3],["ADD-PR-SPKR","FIXED SPRINKLER/WATER SPRAY SYSTEM: Test the fixed sprinkler/water spray fire protection system for the paint room — verify system pressurised, nozzles unobstructed, remote/local activation functional, and system logged on the fire control plan.",4]],"nextQid":5},{"sr":10,"zone":"OUTSIDE","name":"Garbage Area","q":[["PP-7","Check garbage management including proper segregation, Garbage Record Book entries accurate, disposal receipts retained, and placards posted per MARPOL.",0]],"nextQid":1},{"sr":11,"zone":"OUTSIDE","name":"Midship Store","q":[["ADD-MS1","MIDSHIP STORE — GENERAL CONDITION: Verify general condition of the midship deck store — housekeeping, correct stowage/identification of stores, lighting and ventilation adequate. Inspect the adjacent hydraulic power pack room (hatch cover hydraulics) for oil leaks, correct pressure gauge readings and general condition.",0]],"nextQid":1},{"sr":12,"zone":"OUTSIDE","name":"Bunker Manifold","q":[["ADD-BM1","BUNKER MANIFOLD: Inspect bunker manifold valves, connections and reducers for condition and correct blanking (spectacle flanges/blank flanges fitted when not in use). Confirm drip trays/save-alls are in place, scupper plugs are available and fitted, bunker hoses/hard arms in good condition, and manifold communication/signage (P&A Manual, isolation valve) satisfactory.",0]],"nextQid":1},{"sr":13,"zone":"OUTSIDE","name":"SOPEP Locker","q":[["D-5","SOPEP EQUIPMENT: Verify equipment complete per plan and accessible. Check bunker station containment, scupper plugs and crew familiarity.",0]],"nextQid":1},{"sr":14,"zone":"OUTSIDE","name":"Chemical Locker","q":[["PW-5","Verify MSDS/SDS available for all chemicals in paint store and deck stores, crew aware of hazards, and appropriate PPE available.",0]],"nextQid":1},{"sr":15,"zone":"OUTSIDE","name":"Cargo Hold and Hatch Covers","q":[["D-6","HATCH COVERS: Inspect panels, compression bars, cleating, gaskets and cross-joint drains. Verify hose test records and weathertight integrity.",0],["DM-5","HATCH COVER HYDRAULICS: Inspect power pack, piping, hoses, cylinders and control panels. Test operation and check for leaks.",1],["CS-1","Inspect cargo hold structural condition including tank top, hopper tanks, topside tanks, transverse bulkheads, frames and coating condition for vessels carrying corrosive cargoes.",2],["CS-2","Test cargo hold bilge pumping system and water ingress detection alarms (WIDAS) to verify all holds can be pumped and water level alarms function at both alert levels.",3],["CS-4","Inspect cargo hold ventilation system including fans, ducting, closing arrangements, booby hatches and fire dampers for operational condition and ability to close for firefighting.",4],["CS-9","Inspect cargo hold electrical equipment condition, gas sampling points accessibility, and verify compliance with IMSBC Code for current cargo type.",5]],"nextQid":6},{"sr":16,"zone":"OUTSIDE","name":"Bunker, Ballast and Fresh Water Tanks","q":[["BF-1","Inspect ballast tank internal structure and coating condition, assess corrosion level, check anodes/ICCP system, and verify tanks suitable for continued service.",0],["BF-3","Check fresh water tanks for structural condition, coating integrity, cross-contamination prevention, treatment system operation and water quality testing records.",1],["BF-5","Inspect tank access arrangements, enclosed space entry procedures, atmosphere testing equipment, rescue equipment and verify enclosed space rescue drill records current.",2]],"nextQid":3},{"sr":17,"zone":"OUTSIDE","name":"Ballast/Fuel/Fresh Water Tank","q":[["BF-2","Examine fuel oil tanks including structural condition, heating coils, sounding/gauging arrangements, high level alarms and overflow containment.",0]],"nextQid":1},{"sr":18,"zone":"OUTSIDE","name":"Ballast Water Management","q":[["BF-4","Verify ballast water management system (BWMS) is operational, type-approved, crew trained, and Ballast Water Record Book properly maintained for D-2 compliance.",0],["PP-9","Inspect ballast water management including BWMS operation, Ballast Water Record Book entries complete and accurate, and D-2 compliance demonstrated.",1],["ADD-BWM1","BALLAST WATER MANAGEMENT SYSTEM (BWMS) OPERATION: Verify the BWMS (filter unit + UV/electrolysis/chemical treatment unit) is operational, control panel free of unresolved alarms, and crew are familiar with startup/shutdown and manual override procedures.",2],["ADD-BWM2","BALLAST WATER RECORD BOOK & D-2 COMPLIANCE: Check the Ballast Water Record Book is up to date and correctly filled, the BWM Certificate / D-2 compliance documentation is valid, and ballast water reporting forms are completed prior to port arrival.",3]],"nextQid":4},{"sr":19,"zone":"OUTSIDE","name":"Forward Station","q":[["H-4","ANCHORING EQUIPMENT: Inspect anchors, cables, windlass, chain stoppers and hawse pipes. Test windlass operation and verify anchor securing.",0],["H-5","CHAIN LOCKER & FORECASTLE: Enter and inspect for structural condition, ventilation, drainage, lighting and cleanliness.",1],["H-6","BOW THRUSTER COMPARTMENT: Inspect machinery, hydraulic/electric systems, ventilation and emergency stops. Check maintenance records.",2],["H-7","EMERGENCY TOWING (ETA): Verify forward and aft towing arrangements rigged, marked and ready for immediate deployment without power.",3],["D-2","MOORING ARRANGEMENTS: Examine fairleads, bollards, bitts, winches and mooring lines FWD and AFT. Check SWL markings, line condition and snap-back zones.",4],["DM-1","WINDLASS & MOORING WINCHES: Test operation, brake effectiveness, clutch mechanism and controls. Check hydraulics for leaks and emergency stops.",5],["DM-6","MOORING WINCH BRAKE TEST: Verify brake rendering test per MSC.1/Circ.1175/Rev.1. Check test records showing brake holds at 60% MBL.",6]],"nextQid":7},{"sr":20,"zone":"OUTSIDE","name":"Forward Store","q":[["ADD-FS1","FORWARD STORE (BOSUN STORE) — GENERAL CONDITION: Verify general condition of the forward/bosun store — correct stowage and identification of ropes, paints, tools and deck stores, housekeeping satisfactory, lighting and ventilation adequate, and access ladder/hatch in safe condition.",0],["ADD-FS2","HYDRAULIC POWER PACK (FORWARD): Inspect the forward hydraulic power pack (windlass/mooring winch hydraulics) located in the forward store — check for oil leaks, correct oil level, pressure gauge readings and general condition.",1],["ADD-FS3","DEWATERING SYSTEM (FORWARD STORE): Verify the dewatering/bilge pumping arrangement for the forward store/forepeak area is operational — pump condition, suction valves clear, and bilge level alarm (if fitted) functioning.",2],["ADD-FS4","BITTER END OF ANCHOR CABLE: Locate and inspect the bitter end of the anchor cable release mechanism, stowed in the forward store — confirm it is accessible, free of paint/corrosion build-up, and can be readily released from outside the chain locker in an emergency.",3],["ADD-FS5","IMMERSION SUITS & LIFEJACKETS (FORWARD STORE): Confirm the 2 immersion suits and 5 lifejackets stowed in the forward store are present, in good condition, within service/inspection date, correctly sized/marked and readily accessible.",4]],"nextQid":5},{"sr":21,"zone":"OUTSIDE","name":"Life Boat Station","q":[["LS-1","Inspect lifeboat hull, equipment, engine operation, release mechanism (LRRS), and verify fall prevention device certificate current and crew competent in launching.",0],["LS-2","Verify lifeboat inventory complete per SOLAS including pyrotechnics within validity, provisions not expired, first aid kit complete, and all required equipment present and serviceable.",1],["LS-3","Examine lifeboat launching appliances including davits, blocks, falls, winch brakes, and verify falls renewed within 5 years and thorough examination current.",2],["LS-6","Verify lifebuoy quantity and distribution correct, self-igniting lights and smoke signals within validity, buoyant lines adequate, and MOB markers operational.",3],["LS-7","Check lifejackets quantity for all persons plus extras, SI-lights attached and valid, immersion suits (where required) tested, and stowage locations clearly marked.",4],["LS-9","Inspect LSA stowage locations marked with IMO symbols, muster list posted, abandon ship procedures understood, and weekly/monthly LSA checks recorded.",5],["LS-10","Verify lifeboat wire lifting slings accessible for inspection (not covered in plastic sheathing) and condition can be assessed per SOLAS III/20.3.1.",6],["LS-11","Confirm lifeboat waterborne and maneuvered within last 3 months with video evidence and date confirmation as per SOLAS III/19.",7],["LS-13","Inspect overside lights at lifeboat stations to verify operational for night-time abandon ship operations.",8],["LS-14","Verify embarkation ladder side ropes in good condition (not rotten in way of thimbles) and all components meet requirements.",9]],"nextQid":10},{"sr":22,"zone":"OUTSIDE","name":"Rescue Boat and Life Raft Station","q":[["LS-4","Test rescue boat condition, engine operation, verify inventory complete, launching appliance functional, and crew can demonstrate launching and recovery.",0],["LS-5","Inspect liferafts including container condition, HRU validity (typically 2 years), painter properly secured, service date within 12 months, and stowage complies with SOLAS.",1]],"nextQid":2},{"sr":23,"zone":"OUTSIDE","name":"Bridge Wings","q":[["ADD-BW1","MOB MARKER/POLE: Confirm the Man Overboard (MOB) marker/pole and self-igniting light/smoke signal are stowed correctly on the bridge wing, in immediate ready condition for release.",0],["ADD-BW2","RPM & RUDDER ANGLE INDICATOR: Confirm the RPM indicator and rudder angle indicator repeaters on the bridge wing are functioning correctly and readings match the wheelhouse instruments.",1],["ADD-BW3","BRIDGE WING EMERGENCY LIGHTING: Confirm emergency lighting on the bridge wing is provided and functioning correctly.",2],["ADD-BW4","BRIDGE WING DOORS: Inspect bridge wing access doors for condition, weathertightness, gasket condition and ease of operation.",3]],"nextQid":4},{"sr":24,"zone":"OUTSIDE","name":"Monkey Island","q":[["D-7","MAST & NAVIGATION LIGHTS: Check mast structure, stays and all navigation lights including emergency. Test fog signal and verify spare bulbs.",0],["RN-9","Check navigation lights, day signals, sound signals including main and emergency lights functional, spare bulbs available, and all signals comply with COLREGS.",1],["ADD-MI1","VDR CAPSULE: Inspect the float-free VDR/S-VDR capsule for physical damage and secure mounting, confirm the hydrostatic release unit is within its service/expiry date, and verify the capsule is free to float clear in an emergency.",2],["ADD-MI2","MAGNETIC COMPASS: Inspect the standard/standby magnetic compass, binnacle and azimuth mirror for condition, and confirm the deviation/correction card is current and legible.",3],["ADD-MI3","X'MAS TREE (MAST) STRUCTURE: Inspect the mast (X'mas tree) structure, ladder/steps, platform and fittings for corrosion, cracks and secure mounting of navigation/signal lights and antennas. Stay wires supporting the mast must NOT be coated, taped or covered -- they are to be left bare so wire strands and corrosion can be visually verified.",4],["ADD-MI4","NAVIGATION LIGHTS: Test all navigation lights (masthead, side, stern, all-round) for correct operation and correct colour, and confirm spare bulbs/lamps and the navigation light failure alarm are available and functioning.",5],["ADD-MI5","MONKEY ISLAND VENTILATORS: Inspect ventilator heads/mushrooms on Monkey Island for corrosion, secure closing arrangements and effective closing mechanism.",6],["ADD-MI6","ANTENNA MARKING & CONDITION: Confirm all antennas (GPS, VHF, Inmarsat, AIS, etc.) are correctly marked/identified, securely mounted, with cabling properly secured and protected.",7]],"nextQid":8},{"sr":25,"zone":"INSIDE","name":"Gym","q":[["ADD-GY1","GYM EQUIPMENT & FACILITY: Confirm all gym equipment is properly secured against the ship's motion and is in good working condition; confirm lighting and the attached toilet facility (if fitted) are in working order.",0]],"nextQid":1},{"sr":26,"zone":"INSIDE","name":"AC Room","q":[["AS-11","AIR CONDITIONING & PROVISION ROOMS: Verify AC/refrigeration system functioning. Check accommodation temperature maintained. Inspect provision room temperature (fridge <5°C, freezer <-18°C), anti-skid flooring, manual call alarm, door handle and emergency door release arrangement.",0]],"nextQid":1},{"sr":27,"zone":"INSIDE","name":"Hospital","q":[["AS-6","Verify hospital/sick bay meets requirements, medicines within validity, medical equipment functional, and medical chest maintained per flag state requirements.",0],["AS-9","Verify arrangements for medical care on board including medicine chest complete, medical officer designated, and communication for shore medical advice available.",1]],"nextQid":2},{"sr":28,"zone":"INSIDE","name":"Fire Control Station","q":[["AS-5","Inspect ventilation and fire damper systems throughout accommodation and machinery spaces to verify dampers operate correctly and can be closed for fire containment.",0],["CS-3","Verify cargo hold fixed fire extinguishing system (CO2) including cylinder room condition, piping, release mechanisms, nozzles and confirm system operational and ready for use.",1],["FF-1","Test fire detection and alarm system including detector response, zone identification, alarm audibility, and verify no zones isolated without valid reason documented.",2],["FF-3","Inspect fire control station equipment including fire plan, quick-closing valve cabinet (with air pressure), emergency stops, pump controls, and communication equipment.",3],["FF-4","Test fire main system including all hydrants, verify adequate pressure at most remote hydrant with pump running, isolation valves operational, and relief valves set correctly.",4],["FF-5","Inspect fire hoses and nozzles at all stations, verify pressure tested, correct nozzle type (jet/spray with shutoff), couplings compatible, and adequate spares available.",5],["FF-6","Verify fireman's outfit complete (2 sets, 4 for tankers), SCBA cylinders charged, spare cylinders adequate, SCBA compressor operational with air quality certificate current.",6],["FF-7","Check portable fire extinguishers for correct type and quantity per fire plan, service dates current, condition satisfactory, and crew know locations and operation.",7],["FF-8","Inspect EEBD (Emergency Escape Breathing Devices) for correct quantity, proper stowage per plan, within service life, and crew familiar with donning and operation.",8],["FF-9","Test fire dampers operation including fusible link type and remote closing dampers, verify damper indicators accurate, and fan emergency stops functional.",9]],"nextQid":10},{"sr":29,"zone":"INSIDE","name":"Changing Lockers","q":[["ADD-CL1","CHANGING LOCKER — GENERAL CONDITION: Verify general condition of deck/engine changing lockers — lighting, ventilation, cleanliness, lockers and benches in good order, free of unauthorized storage.",0]],"nextQid":1},{"sr":30,"zone":"INSIDE","name":"Tally Room","q":[["ADD-TR1","TALLY ROOM — GENERAL CONDITION: Verify general condition of the Tally Room / cargo watch office — lighting, cleanliness, furniture and equipment in good working order.",0]],"nextQid":1},{"sr":31,"zone":"INSIDE","name":"Provision Store","q":[["AS-7","Verify fresh provisions adequate for voyage with quality satisfactory, and storage temperatures correct (fridge <5°C, freezer <-18°C).",0]],"nextQid":1},{"sr":32,"zone":"INSIDE","name":"Galley","q":[["AS-3","Examine galley and food storage areas for hygiene, food handling practices, cold room temperatures, equipment safety and verify food and drinking water safe for consumption.",0]],"nextQid":1},{"sr":33,"zone":"INSIDE","name":"Mess Room","q":[["ADD-MR1","MESS ROOM — GENERAL CONDITION: Verify general condition of the crew/officers' mess room — lighting, furniture, cleanliness and hygiene satisfactory, notice boards up to date.",0]],"nextQid":1},{"sr":34,"zone":"INSIDE","name":"Recreation Room","q":[["ADD-RR1","RECREATION ROOM — LIGHTING & GENERAL CONDITION: Verify lighting and general condition of the crew recreation room, including furniture, entertainment equipment and cleanliness.",0],["ADD-RR2","TRAINING MANUAL AVAILABILITY: Confirm onboard training manual(s)/materials are available and accessible to crew in the recreation room.",1]],"nextQid":2},{"sr":35,"zone":"INSIDE","name":"Emergency Generator Room","q":[["EM-1","Test emergency generator operation including auto-start on blackout (within 45 seconds), verify fuel capacity (18 hours marked), both starting batteries functional.",0],["EM-3","Verify emergency switchboard supplies all required emergency services, test transitional power source, and confirm emergency lighting throughout vessel operational.",1],["EM-4","Inspect emergency generator starting batteries, charging system, verify batteries less than recommended replacement age and capacity test records available.",2],["EM-7","Confirm emergency generator fuel grade appropriate for ambient temperature with winter grade fuel if operating in cold climates.",3]],"nextQid":4},{"sr":36,"zone":"INSIDE","name":"Crew Cabins","q":[["AS-2","Inspect crew accommodation including cabins, messrooms, recreation spaces for MLC compliance covering living standards, ventilation, lighting, sanitary facilities and pest control.",0]],"nextQid":1},{"sr":37,"zone":"INSIDE","name":"Laundry Room","q":[["ADD-LR1","LAUNDRY ROOM — GENERAL CONDITION: Verify general condition of the laundry room — washing/drying machines in working order, lighting and ventilation adequate, drainage free, area clean and free of trip/fire hazards (lint accumulation, stowage of chemicals).",0]],"nextQid":1},{"sr":38,"zone":"INSIDE","name":"Common Toilet","q":[["ADD-CT1","COMMON TOILET — GENERAL CONDITION: Verify general condition of common toilets — fixtures in working order, adequate lighting and ventilation, free of leaks, clean and hygienic.",0]],"nextQid":1},{"sr":39,"zone":"INSIDE","name":"Alleyways","q":[["AS-1","Verify all fire doors in accommodation are self-closing, not held open by unauthorized means, seals and hardware intact, and remote release (where fitted) functional.",0]],"nextQid":1},{"sr":40,"zone":"INSIDE","name":"Elevator","q":[["EL-1","Verify elevator annual service completed by approved contractor, certificate current, deficiencies rectified, and emergency procedures posted.",0],["EL-2","Test elevator safety devices including emergency stop, door interlocks, overload protection, emergency lighting and communication, and manual rescue capability.",1],["EL-3","Inspect elevator machine room condition, verify not used for storage, ventilation adequate, sheaves not greased (traction type), and fire extinguisher available.",2],["EL-4","Check elevator car condition, controls functional, floor leveling accurate, emergency lighting and communication operational in car.",3],["EL-5","Verify elevator safety notices posted including bad weather restrictions, fire evacuation procedures, and maximum capacity clearly displayed.",4]],"nextQid":5},{"sr":41,"zone":"INSIDE","name":"Bridge","q":[["RN-1","Test GMDSS equipment including VHF DSC, MF/HF DSC, Inmarsat-C, EPIRB, SART and NAVTEX to verify all operational, tested and batteries/HRU within validity.",0],["RN-2","Verify radar systems (X-band and S-band) fully operational including performance monitor test, ARPA/target tracking, heading/speed inputs and integration with navigation systems.",1],["RN-3","Examine ECDIS system including ENC database validity, backup arrangements, alarm settings, chart updates, and verify officers hold type-specific training certificates.",2],["RN-4","Test steering gear including main, auxiliary and emergency steering systems, verify alarms and indicators, and confirm emergency steering drill records current (minimum 3-monthly).",3],["RN-5","Verify VDR/S-VDR is recording without faults, annual performance test current, data can be downloaded, and bridge team familiar with emergency data preservation.",4],["RN-6","Test Bridge Navigational Watch Alarm System (BNWAS) to verify alarms function through all stages including bridge, backup locations, and system cannot be easily defeated.",5],["RN-7","Examine magnetic compass, gyro compass and GPS receivers to verify accuracy, compare headings, confirm deviation card current, and backup navigation means available.",6],["RN-8","Verify AIS operational and correctly configured with vessel particulars, navigational status current, and SSAS/LRIT systems (where fitted) tested and functional.",7],["RN-10","Inspect echo sounder, speed log, course recorder, autopilot and other navigation aids to verify operational and providing accurate data with alarms functional.",8],["RN-11","Test GMDSS equipment operation on reserve power (batteries) to verify functionality during main power failure as required by SOLAS.",9],["RN-12","Verify GMDSS MSI (Maritime Safety Information) reception correctly configured for vessel's area of operation including NAVTEX stations and SafetyNET.",10],["RN-13","Confirm BNWAS reset switch location requires physical movement to watchkeeping position - not accessible from chart room or behind curtains.",11],["RN-14","Review compass error records to verify errors obtained at least once per watch and recorded as per STCW requirements.",12],["RN-16","Inspect portable VHF radios for quantity, battery condition, charging status and verify operational for use in emergencies and cargo operations.",13],["LS-8","Verify line-throwing apparatus available with rockets within validity, distress signals (parachute rockets, hand flares) adequate and within validity, properly stowed.",14]],"nextQid":15},{"sr":42,"zone":"INSIDE","name":"Battery Room","q":[["AS-10","Inspect battery room for adequate ventilation, no hydrogen accumulation risk, battery condition satisfactory and charging system functional.",0]],"nextQid":1},{"sr":43,"zone":"INSIDE","name":"Cargo Control Room","q":[["H-8","REMOTE DRAFT GAUGES: Test FWD and AFT draft indicators for operation and accuracy. Compare with manual measurement.",0],["CS-5","Examine cargo control room equipment (where fitted) including tank level gauging, valve remote control, cargo pump monitoring and verify instrumentation operational and calibrated.",1],["CS-6","Check portable gas detection equipment including multi-gas detectors, O2 analyzers, calibration status and verify spare sensors available and crew competent in operation.",2],["CS-8","Test loading instrument/computer and verify loading booklet available with approved loading conditions, and evidence of monitoring during cargo operations.",3],["CS-10","Verify cargo monitoring equipment operational including oxygen analyzer, combustible gas indicator, pH meter and temperature measuring devices where required.",4]],"nextQid":5},{"sr":44,"zone":"INSIDE","name":"Cargo Documents","q":[["DM-4","LIFTING GEAR CERTIFICATION: Review Register of Lifting Appliances, annual inspections, load test certificates and wire certificates.",0],["CS-7","Verify shipper's declaration for bulk cargo on board with cargo information including transportable moisture limit, moisture content, angle of repose and any special hazards.",1],["CS-8","Test loading instrument/computer and verify loading booklet available with approved loading conditions, and evidence of monitoring during cargo operations.",2]],"nextQid":3},{"sr":45,"zone":"INSIDE","name":"Bridge Documents","q":[["LS-12","Verify SOLAS training manual is ship-specific with vessel's actual procedures for survival craft launching including freefall simulation if applicable.",0]],"nextQid":1},{"sr":46,"zone":"INSIDE","name":"MLC / QHSC","q":[["MQ-1","Review work and rest hours records for compliance with MLC/STCW requirements, verify records consistent, and no evidence of excessive working hours.",0],["MQ-2","Verify ISM implementation including safety policy displayed, crew awareness of responsibilities, defect reporting functioning, and audit findings closed out.",1],["MQ-3","Assess risk assessment and permit to work system effectiveness, sample recent permits for quality, and verify crew competent in conducting risk assessments.",2],["MQ-4","Verify crew certifications valid for positions held, familiarization completed within 24 hours of joining, and watchkeeping arrangements comply with STCW.",3],["MQ-5","Check crew welfare provisions including recreational facilities, communication with home, mess and catering quality, and verify no outstanding MLC complaints.",4],["MQ-6","Verify drug and alcohol policy implementation, testing equipment calibrated, records maintained, and crew understand consequences of non-compliance.",5],["MQ-7","Review safety meeting records, SAIL/near-miss reporting, and verify crew participation in safety culture with evidence of stop-work authority being respected.",6],["MQ-8","Inspect PPE usage and availability, verify correct PPE for tasks observed, and confirm PPE inspection and replacement system in place.",7],["MQ-9","Verify watchkeeping schedule poster accurately reflects actual arrangement and is posted in easily accessible location as per STCW.",8],["MQ-10","Confirm watchkeepers on first watch after port departure are sufficiently rested per STCW requirements (10 hours rest in 24 hours prior).",9],["MQ-11","Verify ship owner's liability insurance (P&I) in place for seafarer claims including repatriation and compensation.",10],["MQ-12","Evidence of Master's review of ISM system conducted with documented findings and company follow-up on identified issues.",11],["MQ-13","Verify potable water quality testing conducted with records maintained, and no E. Coli or coliform contamination detected.",12]],"nextQid":13},{"sr":47,"zone":"INSIDE","name":"Crew Interaction","q":[["CI-1","Assess management team competency through discussion covering vessel systems knowledge, emergency response capability, and familiarity with company procedures.",0],["CI-2","Interact with crew members to assess morale, identify any grievances, verify complaint procedures known, and check communication effectiveness. Conduct meeting with max available crew for good interaction.",1],["CI-3","Verify new crew familiarization completed properly, on-board training conducted, and cadet/trainee programs (if applicable) being implemented.",2],["CI-4","Review crew contracts and employment conditions, verify MLC compliance including wages, leave, repatriation provisions, and seafarer employment agreements available.",3],["CI-5","Conduct officer appraisals as appropriate, document performance observations, and identify any training or development needs.",4],["CI-6","Verify wage payment records show timely payment in accordance with employment agreement and allotment arrangements functioning.Confirm leave entitlement records maintained showing accrual and usage in accordance with employment agreement.",5]],"nextQid":6},{"sr":48,"zone":"INSIDE","name":"PMS","q":[["PM-1","Verify Planned Maintenance System is operational and current, overdue jobs identified and managed with justification, and system reflects actual vessel condition.",0],["PM-2","Review main engine and Generator Engine maintenance records including running hours, wear data, safety device tests, and verify maintenance aligned with manufacturer recommendations and Class requirements.",1],["PM-3","Check critical spare parts inventory against Class-required list, verify availability of key items for main propulsion and essential systems.",2],["PM-4","Review Class survey status including continuous machinery survey (CMS), outstanding recommendations, conditions of class, and verify upcoming surveys planned.",3],["PM-5","Check external analysis records for lubricating oil (main engine, generators, stern tube) and fuel oil, verify recommendations implemented.",4],["PM-6","Verify deck equipment maintenance including mooring winch brake tests, crane inspections, hatch cover maintenance, and LSA/FFA servicing current.",5],["PM-7","Verify Enhanced Survey Programme (ESP) records available for bulk carriers/tankers with close-up survey and thickness measurement records accessible.",6]],"nextQid":7},{"sr":49,"zone":"INSIDE","name":"Security","q":[["SE-1","Verify Ship Security Plan implementation, security equipment operational, crew trained and drilled, and ISSC certificate valid with no outstanding security deficiencies.",0],["SE-2","Test SSAS including activation points, verify covert activation possible, and confirm test communication with CSO and flag Administration current.",1],["SE-3","Check access control procedures including gangway watch, visitor management, ID verification, and restricted area protection at current security level.",2],["SE-4","Verify CSO contact details current, communication procedures for security incidents understood, and security level changes documented and actioned.",3],["SE-5","Inspect anti-piracy/citadel arrangements (where applicable for trade), verify crew trained, communications pre-positioned, and hardening measures available.",4],["SE-6","Verify security sweep procedures understood for searching vessel prior to departure from port with records of sweeps conducted.",5]],"nextQid":6},{"sr":50,"zone":"INSIDE","name":"Energy Management","q":[["EN-1","Review SEEMP Part I, Part II (CII) and Part III, verify vessel is monitoring CII performance, and energy efficiency measures are being implemented.",0],["EN-2","Check fuel saving measures being implemented including generator optimization, steam system efficiency, auxiliary equipment management, and shore power use where available.",1],["EN-3","Verify hull and propeller condition monitoring including cleaning records, performance analysis, and voyage optimization practices being followed.",2],["EN-4","Review FuelEU Maritime compliance (for EU trading vessels) including GHG intensity monitoring, pooling agreements if applicable, and penalty avoidance measures.",3],["EN-5","Review evidence of voyage optimization measures including weather routing, speed optimization, and trim optimization being practiced.",4]],"nextQid":5},{"sr":51,"zone":"ENGINE ROOM","name":"Engine Control Room","q":[["ER-6","Examine main switchboard and electrical distribution including protection, insulation, earth fault indication, and verify LOTO procedures implemented with insulation mats in place.",0],["ER-7","Inspect engine control room equipment, alarm/monitoring systems, UMS changeover, data logger and verify engineer officer familiar with alarm acknowledgment procedures.",1],["ER-13","Verify no electrical fuses bypassed or temporary wiring fitted, and all electrical protection devices intact and functional.",2]],"nextQid":3},{"sr":52,"zone":"ENGINE ROOM","name":"Electrical Workshop","q":[["ADD-EW1","ELECTRICAL WORKSHOP — GENERAL CONDITION: Verify general condition of the electrical workshop — test equipment calibrated and in date, tools stowed correctly, lighting adequate, housekeeping satisfactory and free of fire hazards.",0]],"nextQid":1},{"sr":53,"zone":"ENGINE ROOM","name":"Workshop","q":[["ER-11","Examine E/R workshop, machine tools safety, overhead crane/lifting gear, and verify load test certificates current and electrical safety measures in place.",0]],"nextQid":1},{"sr":54,"zone":"ENGINE ROOM","name":"Engine Store Room","q":[["ADD-ES1","ENGINE ROOM STORES — GENERAL CONDITION: Verify general condition of engine room store room(s) — spares correctly stowed, identified and secured, housekeeping satisfactory, lighting adequate, free of fire/trip hazards.",0]],"nextQid":1},{"sr":55,"zone":"ENGINE ROOM","name":"Auxiliary Engine","q":[["ER-2","Examine generator engines condition, fuel oil pipe protection, crankcase protection, and verify all generators can carry rated load with automatic changeover functional.",0]],"nextQid":1},{"sr":56,"zone":"ENGINE ROOM","name":"Purifier Room","q":[["ER-4","Inspect fuel oil and lubricating oil systems including purifiers, pumps, filters, heating, verify MARPOL FN tape fitted on flanges and recent oil analysis satisfactory.",0]],"nextQid":1},{"sr":57,"zone":"ENGINE ROOM","name":"Sewage Plant","q":[["PP-6","Verify sewage treatment plant operational, effluent quality satisfactory, holding tank arrangements adequate, and discharge records maintained.",0],["PP-11","Verify sewage treatment plant operated in accordance with manufacturer's instructions with evidence of correct operation sequence and effluent quality.",1],["PP-12","Confirm no unauthorized collection or bypass arrangements for sewage that could allow untreated discharge.",2]],"nextQid":3},{"sr":58,"zone":"ENGINE ROOM","name":"Main Engine","q":[["ER-1","Inspect main engine condition including operational capability, fuel oil system integrity (jacketing), crankcase oil mist detector, governors and verify no significant leakages or defects.",0],["ER-12","Check stern tube and shaft sealing arrangement, verify no significant leakage, gravity/header tank level adequate, and temperature monitoring satisfactory.",1]],"nextQid":2},{"sr":59,"zone":"ENGINE ROOM","name":"Compressors","q":[["ER-9","Check auxiliary machinery including air compressors, fresh water generator, cooling water systems, hydrophore and verify adequate capacity for vessel operations.",0]],"nextQid":1},{"sr":60,"zone":"ENGINE ROOM","name":"Coolers","q":[["ER-9","Check auxiliary machinery including air compressors, fresh water generator, cooling water systems, hydrophore and verify adequate capacity for vessel operations.",0]],"nextQid":1},{"sr":61,"zone":"ENGINE ROOM","name":"Fresh/Sea Water Pump","q":[["ER-15","SEA WATER PIPING: Inspect sea water cooling lines throughout engine room for condition. Check for corrosion, wastage, soft patches and temporary repairs. Verify no unauthorized repairs or cement boxes fitted.",0]],"nextQid":1},{"sr":62,"zone":"ENGINE ROOM","name":"Oily Water Separator","q":[["PP-1","Test oily water separator and 15ppm monitor operation, verify OCM calibration current, alarm and automatic stopping device functional, and spares available.",0],["PP-4","Check sludge tank and bilge holding tank capacity adequate for voyage, pumping system operational, and disposal records properly maintained for 3 years.",1]],"nextQid":2},{"sr":63,"zone":"ENGINE ROOM","name":"Incinerator","q":[["PP-5","Inspect incinerator operation, verify prohibited materials understood, service records current, and ash disposal properly recorded in Garbage Record Book.",0]],"nextQid":1},{"sr":64,"zone":"ENGINE ROOM","name":"Bilge Suction","q":[["ER-8","Test bilge pumping system and emergency bilge suction, verify bilge wells accessible, high level alarms functional, and fire pumps achieve required pressure.",0],["ER-14","Test all bilge well high level alarms in machinery spaces and verify alarms received at manned location with correct space identification.",1]],"nextQid":2},{"sr":65,"zone":"ENGINE ROOM","name":"Emergency/Direct Bilge Suction","q":[["ER-8","Test bilge pumping system and emergency bilge suction, verify bilge wells accessible, high level alarms functional, and fire pumps achieve required pressure.",0],["PP-3","Verify all MARPOL seals intact on emergency bilge systems, seal register current, no evidence of tampering, and crew aware of consequences.",1]],"nextQid":2},{"sr":66,"zone":"ENGINE ROOM","name":"Engine Room Lines and Valves","q":[["FF-12","Test engine room fire main isolating valve to verify operational and accessible, allowing isolation for repairs while maintaining fire main to other spaces.",0]],"nextQid":1},{"sr":67,"zone":"ENGINE ROOM","name":"Hypermist System","q":[["ADD-HM1","HYPERMIST SYSTEM — OPERATIONAL TEST: Confirm the Hypermist (local application water mist) fire-fighting system is maintained fully operational at all times. Test the system during the inspection — verify pump start, line pressure, nozzle coverage at protected machinery spaces, and control/alarm panel indications.",0]],"nextQid":1},{"sr":68,"zone":"ENGINE ROOM","name":"Engine Room Misc.","q":[["ER-3","Test boiler and exhaust gas boiler safety systems including low water cutout, flame failure, pressure relief, and verify no leakages and water treatment maintained.",0],["ER-10","Inspect engine room general housekeeping, cleanliness, bilge condition, escape routes clear, and verify adequate PPE available and being used.",1],["FF-10","Verify fire hose lengths in engine room do not exceed 15 meters per SOLAS requirements to ensure effective firefighting capability.",2]],"nextQid":3},{"sr":69,"zone":"ENGINE ROOM","name":"Steering Gear Room","q":[["ER-5","Test steering gear hydraulic system, verify emergency oil storage, check for leakages, and confirm emergency steering procedures posted and crew trained.",0],["RN-15","Verify emergency steering instructions posted at steering gear room and communication with wheelhouse tested and functional.",1]],"nextQid":2},{"sr":70,"zone":"ENGINE ROOM","name":"Emergency Fire Pump","q":[["ER-8","Test bilge pumping system and emergency bilge suction, verify bilge wells accessible, high level alarms functional, and fire pumps achieve required pressure.",0],["EM-2","Test emergency fire pump operation including priming, discharge pressure at most remote hydrant, verify fuel capacity adequate and remote start functional.",1],["EM-6","Verify emergency fire pump has two independent means of access with neither secured from inside, and both access routes clearly marked.",2]],"nextQid":3},{"sr":71,"zone":"ENGINE ROOM","name":"Foam Room","q":[["FF-2","Verify fixed fire extinguishing system (CO2/foam/water spray) operational including cylinder quantity, release mechanism, distribution piping, and pre-release alarms functional.",0]],"nextQid":1},{"sr":72,"zone":"ENGINE ROOM","name":"Engine Room Blower","q":[["ADD-ERB1","ENGINE ROOM BLOWERS: Test engine room forced/induced draft blower fans for correct operation, check for abnormal noise/vibration, condition of fan blades and guards, and confirm remote stop arrangements are functional.",0]],"nextQid":1},{"sr":73,"zone":"ENGINE ROOM","name":"Funnel Flap","q":[["ADD-FF1","FUNNEL FLAP: Test operation of the funnel flap/damper (open and close), confirm it operates smoothly through full travel and seats correctly, and verify remote/local control arrangement is functional.",0]],"nextQid":1},{"sr":74,"zone":"ENGINE ROOM","name":"Funnel Top Side","q":[["ADD-FT1","FUNNEL TOP AREA: Inspect funnel top area — funnel/uptake casing structure, drain line, top plate/cap and spark arrestor (if fitted) for corrosion, damage and secure fitting.",0]],"nextQid":1},{"sr":75,"zone":"ENGINE ROOM","name":"Engine Room Documents","q":[["PP-2","Review Oil Record Book Part I entries for accuracy, verify times match 15ppm recorder printout (UTC), quantities match soundings, and no evidence of improper entries.",0],["PP-8","Verify fuel oil BDNs retained for 3 years, MARPOL samples properly labeled and stored, sulphur content records accurate, and changeover procedures documented for ECAs.",1],["PP-10","Verify IOPP Certificate valid, ship complies with NOx Technical Code where applicable, and all MARPOL-related documentation current and accessible.",2],["PP-13","Confirm fuel sampling line arrangement for various machineries as per IMO requirement, fuel change over record and compliance, Annex VI compliance for ECA change over, Scrubber operation, EGCS operation and record keeping as applicable should be verified",3]],"nextQid":4}];
+var DEFAULT_NEXT_SR = 76;
 
-var TOTAL_QUESTIONS = SECTIONS.reduce(function(acc,s){return acc+s.q.length;},0);
+var SECTIONS, TOTAL_QUESTIONS, sectionsNextSr;
+function cloneSections(arr){ return JSON.parse(JSON.stringify(arr)); }
+function recomputeTotalQuestions(){ TOTAL_QUESTIONS = SECTIONS.reduce(function(acc,s){return acc+s.q.length;},0); }
+/* Applies a saved checklist template (as stored by saveSectionsTemplate
+   below), or falls back to the shipped defaults when there is none yet. */
+function applySectionsTemplate(rec){
+  if(rec && Array.isArray(rec.sections) && rec.sections.length){
+    SECTIONS = rec.sections;
+    sectionsNextSr = rec.nextSr || DEFAULT_NEXT_SR;
+  } else {
+    SECTIONS = cloneSections(DEFAULT_SECTIONS);
+    sectionsNextSr = DEFAULT_NEXT_SR;
+  }
+  recomputeTotalQuestions();
+}
+applySectionsTemplate(null); // synchronous default so nothing ever renders with an empty checklist
+/* Reads whatever checklist template this device has saved locally (an
+   admin's edits, already synced down like every other store) and applies
+   it as SECTIONS. A no-op fallback to the shipped defaults when nothing
+   has ever been saved (a fresh install, or before this feature existed). */
+function loadSectionsTemplate(){
+  return idbGet('appConfig','sections').then(function(rec){ applySectionsTemplate(rec); return SECTIONS; }).catch(function(){ applySectionsTemplate(null); return SECTIONS; });
+}
+/* Persists the CURRENT in-memory SECTIONS (after an admin add/rename/
+   delete/reorder) as this device's checklist template. Goes through the
+   ordinary idbPut, so it picks up the same local-dirty and Supabase
+   dirty-queue hooks every other store already gets — no separate sync
+   path needed. */
+function saveSectionsTemplate(){
+  return idbPut('appConfig', {key:'sections', sections: SECTIONS, nextSr: sectionsNextSr, updatedAt: Date.now()});
+}
+/* A section's CURRENT position, for the numbers actually shown to people
+   ("Section 3 of 75", PDF/report section headers, etc.) — always
+   sequential and always matches what's on screen, even though sr itself
+   is permanent and can end up out of sequence (a gap left by a deletion,
+   a newly added section sorting in wherever it was dropped). */
+function sectionDisplayNumber(section){ return SECTIONS.indexOf(section)+1; }
+/* Looks up a question within a section by its permanent id — never by
+   raw array position, since reordering or adding/deleting a sibling
+   question moves positions around but never touches ids. */
+function findQuestionById(section, qId){
+  return (section && section.q ? section.q : []).filter(function(p){ return p[2]===qId; })[0] || null;
+}
 
 /* =====================================================================
    ICONS — small inline line-icon SVGs, stroke uses currentColor
@@ -671,7 +746,8 @@ var ICONS = {
   clipboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4.5h6a1 1 0 0 1 1 1V6h1.5A1.5 1.5 0 0 1 19 7.5v12A1.5 1.5 0 0 1 17.5 21h-11A1.5 1.5 0 0 1 5 19.5v-12A1.5 1.5 0 0 1 6.5 6H8v-.5a1 1 0 0 1 1-1z"/><path d="M9 11h6M9 14.5h6M9 17.5h3.5"/></svg>',
   warn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.8 2.5 20.2h19z"/><path d="M12 10v4.2M12 17.3h.01"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/></svg>',
-  download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 11.5 12 16l4.5-4.5"/><path d="M5 19h14"/></svg>'
+  download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 11.5 12 16l4.5-4.5"/><path d="M5 19h14"/></svg>',
+  grip: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>'
 };
 
 /* =====================================================================
@@ -922,7 +998,7 @@ function revokeAllURLs(){
    INDEXEDDB LAYER
    ===================================================================== */
 var DB_NAME = 'vir_offline_db_v1';
-var DB_VERSION = 5;
+var DB_VERSION = 6;
 var dbPromise = null;
 function openDB(){
   if(dbPromise) return dbPromise;
@@ -971,6 +1047,13 @@ function openDB(){
       }
       if(!db.objectStoreNames.contains('deletedVessels')){
         db.createObjectStore('deletedVessels', {keyPath:'id'});
+      }
+      /* Small store of app-wide settings, keyed by name — currently just
+         one row ('sections') holding the admin-edited checklist template,
+         when there is one. See applySectionsTemplate/loadSectionsTemplate/
+         saveSectionsTemplate near the top of this file. */
+      if(!db.objectStoreNames.contains('appConfig')){
+        db.createObjectStore('appConfig', {keyPath:'key'});
       }
     };
     req.onsuccess = function(){ resolve(req.result); };
@@ -1449,7 +1532,8 @@ function collectDeficiencyFindings(responses, extrasList, customSectionsList){
   responses.forEach(function(r){
     if(r.applicable===true && r.answer==='no'){
       var section = SECTIONS.filter(function(s){return s.sr===r.sectionSr;})[0];
-      var qtext = section ? section.q[r.qIdx][1] : '';
+      var q = section ? findQuestionById(section, r.qIdx) : null;
+      var qtext = q ? q[1] : '';
       findings.push({
         sectionName: section?section.name:'', sectionKey:r.sectionSr, isCustom:false,
         refLabel:r.ref, qtext:qtext, remarks:r.remarks||'',
@@ -1500,7 +1584,7 @@ function computeSectionCounts(responses){
 /* =====================================================================
    STATE + ROUTER
    ===================================================================== */
-var state = { view:'home', inspectionId:null, sectionSr:null, customSectionId:null, formMode:'new', highlightKey:null };
+var state = { view:'home', inspectionId:null, sectionSr:null, customSectionId:null, formMode:'new', highlightKey:null, manageSectionSr:null };
 var pendingPhotoCtx = null;
 /* Shared, live reference to the inspection record currently open on either
    the Section List or Report screen, so Summary/Conclusion edits made on
@@ -1532,6 +1616,8 @@ function render(){
   else if(state.view==='vesselHistory') task = renderVesselHistory();
   else if(state.view==='manageUsers') task = renderManageUsers();
   else if(state.view==='assignUser') task = renderAssignUser();
+  else if(state.view==='manageChecklist') task = renderManageChecklist();
+  else if(state.view==='manageChecklistSection') task = renderManageChecklistSection();
   else if(state.view==='sections') task = renderSectionList();
   else if(state.view==='section') task = renderSectionDetail();
   else if(state.view==='report') task = renderReport();
@@ -1624,6 +1710,80 @@ function showConfirm(message, okLabel){
     backdrop.addEventListener('click', function(){ finish(false); });
     document.getElementById('confirmCancelBtn').addEventListener('click', function(){ finish(false); });
     document.getElementById('confirmOkBtn').addEventListener('click', function(){ finish(true); });
+  });
+}
+/* Single-line text prompt, in the same bottom-sheet style as showConfirm —
+   used for naming/renaming a section or a vessel-list-style item. Resolves
+   the trimmed text, or null if cancelled/left blank. */
+function showPrompt(title, initialValue, placeholder, okLabel){
+  return new Promise(function(resolve){
+    var backdrop = document.createElement('div');
+    backdrop.className = 'sheet-backdrop';
+    var panel = document.createElement('div');
+    panel.className = 'form-sheet';
+    panel.innerHTML = '' +
+      '<h3>'+escapeHtml(title)+'</h3>'+
+      '<div class="field"><input type="text" id="promptInput" value="'+escapeHtml(initialValue||'')+'" placeholder="'+escapeHtml(placeholder||'')+'"></div>'+
+      '<div class="form-actions">'+
+        '<button class="btn btn-outline" id="promptCancelBtn">Cancel</button>'+
+        '<button class="btn btn-primary" id="promptOkBtn">'+escapeHtml(okLabel||'Save')+'</button>'+
+      '</div>';
+    document.body.appendChild(backdrop);
+    document.body.appendChild(panel);
+    var input = document.getElementById('promptInput');
+    input.focus();
+    input.select();
+    var done = false;
+    function finish(result){
+      if(done) return; done = true;
+      backdrop.remove(); panel.remove();
+      resolve(result);
+    }
+    backdrop.addEventListener('click', function(){ finish(null); });
+    document.getElementById('promptCancelBtn').addEventListener('click', function(){ finish(null); });
+    document.getElementById('promptOkBtn').addEventListener('click', function(){
+      var v = input.value.trim();
+      finish(v || null);
+    });
+    input.addEventListener('keydown', function(e){
+      if(e.key==='Enter'){ e.preventDefault(); document.getElementById('promptOkBtn').click(); }
+    });
+  });
+}
+/* Two-field prompt (reference code + question text) for adding or editing
+   a checklist question. Resolves {ref, text}, or null if cancelled or
+   left with an empty question text. */
+function showQuestionEditor(title, initialRef, initialText){
+  return new Promise(function(resolve){
+    var backdrop = document.createElement('div');
+    backdrop.className = 'sheet-backdrop';
+    var panel = document.createElement('div');
+    panel.className = 'form-sheet';
+    panel.innerHTML = '' +
+      '<h3>'+escapeHtml(title)+'</h3>'+
+      '<div class="field"><label>Reference code</label><input type="text" id="qeRef" value="'+escapeHtml(initialRef||'')+'" placeholder="e.g. H-1"></div>'+
+      '<div class="field"><label>Question text</label><textarea id="qeText" rows="4" placeholder="What should be checked?">'+escapeHtml(initialText||'')+'</textarea></div>'+
+      '<div class="form-actions">'+
+        '<button class="btn btn-outline" id="qeCancelBtn">Cancel</button>'+
+        '<button class="btn btn-primary" id="qeOkBtn">Save</button>'+
+      '</div>';
+    document.body.appendChild(backdrop);
+    document.body.appendChild(panel);
+    document.getElementById('qeRef').focus();
+    var done = false;
+    function finish(result){
+      if(done) return; done = true;
+      backdrop.remove(); panel.remove();
+      resolve(result);
+    }
+    backdrop.addEventListener('click', function(){ finish(null); });
+    document.getElementById('qeCancelBtn').addEventListener('click', function(){ finish(null); });
+    document.getElementById('qeOkBtn').addEventListener('click', function(){
+      var ref = document.getElementById('qeRef').value.trim();
+      var text = document.getElementById('qeText').value.trim();
+      if(!text){ finish(null); return; }
+      finish({ref: ref, text: text});
+    });
   });
 }
 function openLightbox(url){
@@ -2253,6 +2413,7 @@ function renderHome(){
       '</div>';
     var footerLinksHtml = '<div class="footer-links">'+
       (isAdminRole() || isDirectorRole() ? '<button class="btn-ghost" id="btnManageVessels">Manage vessels</button>' : '')+
+      (isAdminRole() ? '<button class="btn-ghost" id="btnManageChecklist">Manage checklist</button>' : '')+
       (isAdminRole() ? '<button class="btn-ghost" id="btnManageUsers">Manage users</button>' : '')+
       (!isDirectorRole() ? '<button class="btn-ghost" id="btnImportBackup">Import backup</button>' : '')+
       (currentRole.type==='admin' && !previewRole ? '<button class="btn-ghost" id="btnPreviewRole">Preview as\u2026</button>' : '')+
@@ -2352,6 +2513,9 @@ function wireHome(){
 
   var btnManageVessels = document.getElementById('btnManageVessels');
   if(btnManageVessels) btnManageVessels.addEventListener('click', function(){ navigate('vessels'); });
+
+  var btnManageChecklist = document.getElementById('btnManageChecklist');
+  if(btnManageChecklist) btnManageChecklist.addEventListener('click', function(){ navigate('manageChecklist'); });
 
   var btnManageUsers = document.getElementById('btnManageUsers');
   if(btnManageUsers) btnManageUsers.addEventListener('click', function(){ navigate('manageUsers'); });
@@ -2748,6 +2912,294 @@ function wireVessels(){
 }
 
 /* =====================================================================
+   REORDERABLE LIST — generic drag-to-reorder for a flat list of sibling
+   rows, each carrying a stable "data-reorder-id" and a drag handle
+   marked "data-grip". Built on Pointer Events (mouse + touch alike),
+   the same technique already used for dragging a photo onto another
+   card (see wireThumbDrag above) — proven to work reliably on phones
+   in this app already. On drop, calls onReorder(idsInNewOrder) with
+   every row's data-reorder-id read back off the DOM in its new order;
+   the caller is responsible for persisting that order.
+   ===================================================================== */
+function wireReorderableList(containerEl, onReorder){
+  if(!containerEl) return;
+  var DRAG_THRESHOLD = 6;
+  var d = null;
+  function siblingRows(){
+    return Array.prototype.slice.call(containerEl.children).filter(function(el){
+      return el.hasAttribute && el.hasAttribute('data-reorder-id');
+    });
+  }
+  function onMove(e){
+    if(!d || e.pointerId!==d.pointerId) return;
+    var dy = e.clientY - d.startY;
+    if(!d.active){
+      if(Math.abs(dy) < DRAG_THRESHOLD) return;
+      d.active = true;
+      d.row.classList.add('reorder-dragging');
+      d.placeholder = document.createElement('div');
+      d.placeholder.className = 'reorder-placeholder';
+      d.placeholder.style.height = d.startRect.height+'px';
+      d.row.parentNode.insertBefore(d.placeholder, d.row.nextSibling);
+      d.row.style.position = 'fixed';
+      d.row.style.left = d.startRect.left+'px';
+      d.row.style.width = d.startRect.width+'px';
+      d.row.style.top = d.startRect.top+'px';
+      d.row.style.zIndex = '25'; // above the sticky appbar (z-index:20) while dragging near the top
+    }
+    e.preventDefault();
+    d.row.style.top = (d.startRect.top+dy)+'px';
+    var edge = 70;
+    if(e.clientY < edge) window.scrollBy(0, -14);
+    else if(e.clientY > window.innerHeight-edge) window.scrollBy(0, 14);
+    var rows = siblingRows().filter(function(r){ return r!==d.row; });
+    var placed = false;
+    for(var i=0;i<rows.length;i++){
+      var rect = rows[i].getBoundingClientRect();
+      if(e.clientY < rect.top+rect.height/2){
+        rows[i].parentNode.insertBefore(d.placeholder, rows[i]);
+        placed = true;
+        break;
+      }
+    }
+    if(!placed) containerEl.appendChild(d.placeholder);
+  }
+  function onUp(e){
+    if(!d || (e.pointerId!=null && e.pointerId!==d.pointerId)) return;
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    document.removeEventListener('pointercancel', onUp);
+    var finished = d;
+    d = null;
+    if(!finished.active) return; // never exceeded the threshold — a normal tap, handled elsewhere
+    finished.row.classList.remove('reorder-dragging');
+    finished.row.style.position = ''; finished.row.style.left = '';
+    finished.row.style.top = ''; finished.row.style.width = ''; finished.row.style.zIndex = '';
+    if(finished.placeholder){
+      finished.placeholder.parentNode.insertBefore(finished.row, finished.placeholder);
+      finished.placeholder.remove();
+    }
+    onReorder(siblingRows().map(function(r){ return r.getAttribute('data-reorder-id'); }));
+  }
+  containerEl.querySelectorAll('[data-grip]').forEach(function(grip){
+    var row = grip.closest('[data-reorder-id]');
+    if(!row) return;
+    try{ grip.style.touchAction = 'none'; }catch(e){}
+    grip.addEventListener('pointerdown', function(e){
+      if(e.button!=null && e.button!==0) return;
+      if(d) return;
+      d = {
+        pointerId: e.pointerId, row: row, startY: e.clientY,
+        startRect: row.getBoundingClientRect(), active: false, placeholder: null
+      };
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+      document.addEventListener('pointercancel', onUp);
+    });
+  });
+}
+
+/* =====================================================================
+   VIEW: MANAGE CHECKLIST — admin-only screen to add, rename, delete and
+   reorder the sections and questions of the checklist template every
+   inspection (past and future) is built from. See DEFAULT_SECTIONS /
+   applySectionsTemplate near the top of this file for how sr/qId keep
+   already-recorded answers correctly attached across edits.
+   ===================================================================== */
+function manageRowHTML(id, title, sub){
+  return '' +
+  '<div class="manage-row" data-reorder-id="'+escapeHtml(String(id))+'">'+
+    '<button type="button" class="grip-handle" data-grip aria-label="Drag to reorder">'+ICONS.grip+'</button>'+
+    '<div class="manage-row-body" data-role="open">'+
+      '<div class="manage-row-title">'+escapeHtml(title)+'</div>'+
+      (sub ? '<div class="manage-row-sub">'+escapeHtml(sub)+'</div>' : '')+
+    '</div>'+
+    '<button type="button" class="icon-btn" data-role="menu" aria-label="More options">'+ICONS.dots+'</button>'+
+  '</div>';
+}
+function renderManageChecklist(){
+  var rows = SECTIONS.map(function(s){
+    return manageRowHTML(s.sr, s.name, s.q.length+(s.q.length===1?' question':' questions'));
+  }).join('');
+  return Promise.resolve('' +
+    '<div class="appbar">'+
+      '<button class="back" data-action="home">'+ICONS.back+'</button>'+
+      '<div class="title-wrap"><h1>Manage checklist</h1></div>'+
+    '</div>'+
+    '<div class="section-pad fab-new">'+
+      '<button class="btn btn-primary btn-block" id="btnAddChecklistSection">'+ICONS.plus+'Add section</button>'+
+    '</div>'+
+    '<div id="manageSectionsList">'+rows+'</div>'+
+    '<p class="footer-note">Drag '+ICONS.grip+' to reorder. Changes here apply to every inspection, including ones already in progress or finished — renaming or reordering just changes how a section or question is labelled and where it sits; deleting one removes it from the checklist everywhere but keeps any answers already recorded against it.</p>'
+  );
+}
+function persistSectionsAndRerender(){
+  return saveSectionsTemplate().then(function(){ render(); });
+}
+function wireManageChecklist(){
+  // Back button uses data-action="home", already wired globally in wireCurrentView().
+
+  var addBtn = document.getElementById('btnAddChecklistSection');
+  if(addBtn) addBtn.addEventListener('click', function(){
+    showPrompt('New section name', '', 'e.g. Forecastle Store').then(function(name){
+      if(!name) return;
+      var sr = sectionsNextSr++;
+      SECTIONS.push({sr: sr, zone: '', name: name, q: [], nextQid: 0});
+      persistSectionsAndRerender().then(function(){ toast('Section added'); });
+    });
+  });
+
+  document.querySelectorAll('#manageSectionsList [data-reorder-id]').forEach(function(row){
+    var sr = parseInt(row.getAttribute('data-reorder-id'),10);
+    var openEl = row.querySelector('[data-role="open"]');
+    if(openEl) openEl.addEventListener('click', function(){
+      navigate('manageChecklistSection', {manageSectionSr: sr});
+    });
+    var menuBtn = row.querySelector('[data-role="menu"]');
+    if(menuBtn) menuBtn.addEventListener('click', function(e){
+      e.stopPropagation();
+      var section = SECTIONS.filter(function(s){ return s.sr===sr; })[0];
+      if(!section) return;
+      openSheet([
+        {label:'Rename section', icon:ICONS.edit, onClick:function(){
+          showPrompt('Rename section', section.name).then(function(name){
+            if(!name) return;
+            section.name = name;
+            persistSectionsAndRerender();
+          });
+        }},
+        {label:'Delete section', icon:ICONS.trash, danger:true, onClick:function(){
+          showConfirm('Delete "'+section.name+'" from the checklist? It disappears from every inspection’s section list, including past ones. Anything already recorded against it is kept, not deleted, but will no longer be shown.').then(function(ok){
+            if(!ok) return;
+            SECTIONS = SECTIONS.filter(function(s){ return s.sr!==sr; });
+            persistSectionsAndRerender().then(function(){ toast('Section deleted'); });
+          });
+        }}
+      ]);
+    });
+  });
+
+  wireReorderableList(document.getElementById('manageSectionsList'), function(newOrderIds){
+    var bySr = {};
+    SECTIONS.forEach(function(s){ bySr[s.sr] = s; });
+    var reordered = newOrderIds.map(function(id){ return bySr[parseInt(id,10)]; }).filter(Boolean);
+    // Defensive: keep any section the reorder callback somehow missed, at the end.
+    SECTIONS.forEach(function(s){ if(reordered.indexOf(s)===-1) reordered.push(s); });
+    SECTIONS = reordered;
+    saveSectionsTemplate();
+  });
+}
+
+/* =====================================================================
+   VIEW: MANAGE CHECKLIST — SECTION DETAIL (its questions)
+   ===================================================================== */
+function renderManageChecklistSection(){
+  var section = SECTIONS.filter(function(s){ return s.sr===state.manageSectionSr; })[0];
+  if(!section) return Promise.resolve('' +
+    '<div class="appbar">'+
+      '<button class="back" data-action="manage-checklist-back">'+ICONS.back+'</button>'+
+      '<div class="title-wrap"><h1>Manage checklist</h1></div>'+
+    '</div>'+
+    '<div class="loading">This section no longer exists — it may have just been deleted on another device.</div>'
+  );
+  var rows = section.q.map(function(pair){
+    return manageRowHTML(pair[2], pair[0]+' — '+pair[1], null);
+  }).join('');
+  return Promise.resolve('' +
+    '<div class="appbar">'+
+      '<button class="back" data-action="manage-checklist-back">'+ICONS.back+'</button>'+
+      '<div class="title-wrap"><h1>'+escapeHtml(section.name)+'</h1><p class="sub">Section '+sectionDisplayNumber(section)+' of '+SECTIONS.length+'</p></div>'+
+    '</div>'+
+    '<div class="section-pad" style="display:flex;gap:10px;">'+
+      '<button class="btn btn-outline" id="btnRenameChecklistSection" style="flex:1;">'+ICONS.edit+'Rename section</button>'+
+    '</div>'+
+    '<div class="section-pad fab-new">'+
+      '<button class="btn btn-primary btn-block" id="btnAddChecklistQuestion">'+ICONS.plus+'Add question</button>'+
+    '</div>'+
+    '<div id="manageQuestionsList">'+rows+'</div>'+
+    (section.q.length ? '<p class="footer-note">Drag '+ICONS.grip+' to reorder.</p>' : '<div class="empty-state" style="margin:6px 16px 16px;"><p>No questions in this section yet.</p></div>')+
+    '<div class="section-pad" style="margin:8px 0 24px;">'+
+      '<button class="delete-link" id="btnDeleteChecklistSection">Delete this section</button>'+
+    '</div>'
+  );
+}
+function wireManageChecklistSection(){
+  var sr = state.manageSectionSr;
+  var backBtn = document.querySelector('.appbar .back');
+  if(backBtn) backBtn.addEventListener('click', function(){ navigate('manageChecklist'); });
+
+  var section = SECTIONS.filter(function(s){ return s.sr===sr; })[0];
+  if(!section) return;
+
+  var renameBtn = document.getElementById('btnRenameChecklistSection');
+  if(renameBtn) renameBtn.addEventListener('click', function(){
+    showPrompt('Rename section', section.name).then(function(name){
+      if(!name) return;
+      section.name = name;
+      persistSectionsAndRerender();
+    });
+  });
+
+  var addQBtn = document.getElementById('btnAddChecklistQuestion');
+  if(addQBtn) addQBtn.addEventListener('click', function(){
+    showQuestionEditor('New question', '', '').then(function(result){
+      if(!result) return;
+      var qId = section.nextQid || 0;
+      section.nextQid = qId+1;
+      section.q.push([result.ref, result.text, qId]);
+      persistSectionsAndRerender().then(function(){ toast('Question added'); });
+    });
+  });
+
+  document.querySelectorAll('#manageQuestionsList [data-reorder-id]').forEach(function(row){
+    var qId = parseInt(row.getAttribute('data-reorder-id'),10);
+    var openEl = row.querySelector('[data-role="open"]');
+    function editThisQuestion(){
+      var pair = findQuestionById(section, qId);
+      if(!pair) return;
+      showQuestionEditor('Edit question', pair[0], pair[1]).then(function(result){
+        if(!result) return;
+        pair[0] = result.ref; pair[1] = result.text;
+        persistSectionsAndRerender();
+      });
+    }
+    if(openEl) openEl.addEventListener('click', editThisQuestion);
+    var menuBtn = row.querySelector('[data-role="menu"]');
+    if(menuBtn) menuBtn.addEventListener('click', function(e){
+      e.stopPropagation();
+      openSheet([
+        {label:'Edit question', icon:ICONS.edit, onClick: editThisQuestion},
+        {label:'Delete question', icon:ICONS.trash, danger:true, onClick:function(){
+          showConfirm('Delete this question from "'+section.name+'"? It disappears from every inspection, including past ones. Any answer already recorded against it is kept, not deleted, but will no longer be shown.').then(function(ok){
+            if(!ok) return;
+            section.q = section.q.filter(function(p){ return p[2]!==qId; });
+            persistSectionsAndRerender().then(function(){ toast('Question deleted'); });
+          });
+        }}
+      ]);
+    });
+  });
+
+  wireReorderableList(document.getElementById('manageQuestionsList'), function(newOrderIds){
+    var byId = {};
+    section.q.forEach(function(p){ byId[p[2]] = p; });
+    var reordered = newOrderIds.map(function(id){ return byId[parseInt(id,10)]; }).filter(Boolean);
+    section.q.forEach(function(p){ if(reordered.indexOf(p)===-1) reordered.push(p); });
+    section.q = reordered;
+    saveSectionsTemplate();
+  });
+
+  var deleteBtn = document.getElementById('btnDeleteChecklistSection');
+  if(deleteBtn) deleteBtn.addEventListener('click', function(){
+    showConfirm('Delete "'+section.name+'" from the checklist? It disappears from every inspection’s section list, including past ones. Anything already recorded against it is kept, not deleted, but will no longer be shown.').then(function(ok){
+      if(!ok) return;
+      SECTIONS = SECTIONS.filter(function(s){ return s.sr!==sr; });
+      saveSectionsTemplate().then(function(){ navigate('manageChecklist'); });
+    });
+  });
+}
+
+/* =====================================================================
    VIEW: VESSEL PARTICULARS FORM — full page rather than a small modal,
    since a vessel's registry/class/tonnage/machinery/ownership details add
    up to well over twenty fields; a popup would be unusable for that many.
@@ -2929,14 +3381,15 @@ function renderSectionList(){
         extrasCountMap[ex.sectionSr] = (ex.customFindings||[]).length;
       });
 
-      var rows = SECTIONS.map(function(s){
+      var rows = SECTIONS.map(function(s, idx){
         var done = counts[s.sr]||0, total = s.q.length;
         var badgeClass = done===0 ? '' : (done===total ? 'done' : 'partial');
-        var searchText = (String(s.sr)+' '+s.name).toLowerCase();
+        var displayNum = idx+1;
+        var searchText = (String(displayNum)+' '+s.name).toLowerCase();
         return '' +
         '<button class="section-row" data-open-section="'+s.sr+'" data-search="'+escapeHtml(searchText)+'">'+
           '<div class="bar"></div>'+
-          '<div class="num">'+String(s.sr).padStart(2,'0')+'</div>'+
+          '<div class="num">'+String(displayNum).padStart(2,'0')+'</div>'+
           '<div class="name">'+escapeHtml(s.name)+'</div>'+
           '<div class="badge '+badgeClass+'">'+done+'/'+total+'</div>'+
           '<div class="chev">'+ICONS.chevron+'</div>'+
@@ -3241,8 +3694,8 @@ function renderSectionDetail(){
 
     var allPhotos = (extras.photos||[]).slice();
     (extras.customFindings||[]).forEach(function(cf){ allPhotos = allPhotos.concat(cf.photos||[]); });
-    section.q.forEach(function(pair, i){
-      var rec = respMap[i];
+    section.q.forEach(function(pair){
+      var rec = respMap[pair[2]];
       if(rec && rec.photos) allPhotos = allPhotos.concat(rec.photos);
     });
 
@@ -3259,16 +3712,16 @@ function renderSectionDetail(){
         saveChain.then(function(){ return idbPutRaw('sectionExtras', extras); }).catch(function(){});
       }
       var total = section.q.length, done=0;
-      var cards = section.q.map(function(pair, i){
-        var rec = respMap[i] || {applicable:null,answer:null,remarks:'',correctiveAction:'',preventiveAction:'',photos:[]};
+      var cards = section.q.map(function(pair){
+        var rec = respMap[pair[2]] || {applicable:null,answer:null,remarks:'',correctiveAction:'',preventiveAction:'',photos:[]};
         if(isDecided(rec)) done++;
-        return questionCardHTML(section.sr, i, pair[0], pair[1], rec);
+        return questionCardHTML(section.sr, pair[2], pair[0], pair[1], rec);
       }).join('');
 
       return '' +
       '<div class="appbar">'+
         '<button class="back" data-action="back-to-sections">'+ICONS.back+'</button>'+
-        '<div class="title-wrap"><h1>'+escapeHtml(section.name)+'</h1><p class="sub">Section '+section.sr+' of '+SECTIONS.length+'</p></div>'+
+        '<div class="title-wrap"><h1>'+escapeHtml(section.name)+'</h1><p class="sub">Section '+sectionDisplayNumber(section)+' of '+SECTIONS.length+'</p></div>'+
         '<div class="meta" id="sectionProgressMeta"><strong>'+done+'/'+total+'</strong>done</div>'+
       '</div>'+
       '<div style="padding-top:14px;">'+
@@ -3626,10 +4079,10 @@ function buildPhotoMoveDestinations(customSectionsList){
       mainLabel: sec.name, subLabel: 'General photos for this section',
       search: (sec.name+' general photos').toLowerCase()
     });
-    sec.q.forEach(function(pair, qIdx){
+    sec.q.forEach(function(pair){
       var ref = pair[0], qtext = pair[1];
       dests.push({
-        kind:'question', sectionSr:sec.sr, qIdx:qIdx, ref:ref,
+        kind:'question', sectionSr:sec.sr, qIdx:pair[2], ref:ref,
         mainLabel: sec.name+' \u2014 '+ref, subLabel: qtext,
         search: (sec.name+' '+ref+' '+qtext).toLowerCase()
       });
@@ -4718,14 +5171,14 @@ function buildInspectionPDF(insp, responses, extrasList, customSectionsList, ves
     SECTIONS.forEach(function(section){
       var extras = extrasMap[section.sr];
       var hasAny = (extras && ((extras.photos&&extras.photos.length) || (extras.customFindings&&extras.customFindings.length)));
-      section.q.forEach(function(pair,i){ if(respMap[section.sr+'_'+i]) hasAny = true; });
+      section.q.forEach(function(pair){ if(respMap[section.sr+'_'+pair[2]]) hasAny = true; });
       if(!hasAny) return;
       chain = chain.then(function(){
-        y = pdfSectionBand(doc, String(section.sr).padStart(2,'0')+'.  '+section.name, y);
+        y = pdfSectionBand(doc, String(sectionDisplayNumber(section)).padStart(2,'0')+'.  '+section.name, y);
       });
       renderGeneralPhotos(extras);
-      section.q.forEach(function(pair,i){
-        var rec = respMap[section.sr+'_'+i];
+      section.q.forEach(function(pair){
+        var rec = respMap[section.sr+'_'+pair[2]];
         if(rec) renderQuestionBlock(pair[0], pair[1], rec);
       });
       renderCustomFindings(extras);
@@ -5013,9 +5466,9 @@ function buildPrintableReport(insp, responses, extrasList, customSectionsList, v
     var generalRow = generalPhotosRowHtml(extras);
     if(generalRow){ anyRow = true; rowsHtml += generalRow; }
 
-    section.q.forEach(function(pair, i){
+    section.q.forEach(function(pair){
       var ref = pair[0], qtext = pair[1];
-      var rec = respMap[section.sr+'_'+i];
+      var rec = respMap[section.sr+'_'+pair[2]];
       if(!rec) return;
       anyRow = true;
       var tag = 'Pending', tagStyle = 'background:#eee;color:#555;';
@@ -5038,7 +5491,7 @@ function buildPrintableReport(insp, responses, extrasList, customSectionsList, v
     if(cfRows){ anyRow = true; rowsHtml += cfRows; }
 
     if(anyRow){
-      sectionsHtml += '<div class="pr-sec-h">'+escapeHtml(String(section.sr).padStart(2,'0'))+'. '+escapeHtml(section.name)+'</div>'+rowsHtml;
+      sectionsHtml += '<div class="pr-sec-h">'+escapeHtml(String(sectionDisplayNumber(section)).padStart(2,'0'))+'. '+escapeHtml(section.name)+'</div>'+rowsHtml;
     }
   });
   (customSectionsList||[]).forEach(function(cs){
@@ -5297,20 +5750,21 @@ function exportInspectionCSV(inspId){
 
     var rows = [['Sr','Section','Ref','Question','Applicable','Finding','Remarks','Corrective Action','Preventive Action','Photos']];
     SECTIONS.forEach(function(section){
+      var displayNum = sectionDisplayNumber(section);
       var extras = extrasMap[section.sr];
       if(extras && extras.photos && extras.photos.length){
-        rows.push([section.sr, section.name, 'General', 'General section photos', '', '', '', '', '', extras.photos.length]);
+        rows.push([displayNum, section.name, 'General', 'General section photos', '', '', '', '', '', extras.photos.length]);
       }
-      section.q.forEach(function(pair,i){
-        var rec = respMap[section.sr+'_'+i];
+      section.q.forEach(function(pair){
+        var rec = respMap[section.sr+'_'+pair[2]];
         var applicable = !rec || rec.applicable===null ? '' : (rec.applicable? 'Applicable':'N/A');
         var finding = rec && rec.applicable===true ? (rec.answer==='yes'?'Yes':(rec.answer==='no'?'No':'')) : '';
-        rows.push([section.sr, section.name, pair[0], pair[1], applicable, finding, (rec&&rec.remarks)||'', (rec&&rec.correctiveAction)||'', (rec&&rec.preventiveAction)||'', (rec&&rec.photos?rec.photos.length:0)]);
+        rows.push([displayNum, section.name, pair[0], pair[1], applicable, finding, (rec&&rec.remarks)||'', (rec&&rec.correctiveAction)||'', (rec&&rec.preventiveAction)||'', (rec&&rec.photos?rec.photos.length:0)]);
       });
       if(extras && extras.customFindings && extras.customFindings.length){
         extras.customFindings.forEach(function(cf){
           var finding = cf.answer==='yes'?'Yes':(cf.answer==='no'?'No':'');
-          rows.push([section.sr, section.name, 'Extra', cf.text||'', 'Applicable', finding, '', cf.correctiveAction||'', cf.preventiveAction||'', (cf.photos?cf.photos.length:0)]);
+          rows.push([displayNum, section.name, 'Extra', cf.text||'', 'Applicable', finding, '', cf.correctiveAction||'', cf.preventiveAction||'', (cf.photos?cf.photos.length:0)]);
         });
       }
     });
@@ -5350,6 +5804,8 @@ function wireCurrentView(){
   else if(state.view==='vesselHistory') wireVesselHistory();
   else if(state.view==='manageUsers') wireManageUsers();
   else if(state.view==='assignUser') wireAssignUser();
+  else if(state.view==='manageChecklist') wireManageChecklist();
+  else if(state.view==='manageChecklistSection') wireManageChecklistSection();
   else if(state.view==='sections') wireSectionList();
   else if(state.view==='section') wireSectionDetail();
   else if(state.view==='report') wireReport();
@@ -5424,7 +5880,7 @@ try{
 
 var sbUser = null;
 var sbSyncState = { status:'idle', lastSyncedAt:null, error:null, authBusy:false, authError:null };
-var SB_STORES = ['inspections','responses','sectionExtras','customSections','vessels'];
+var SB_STORES = ['inspections','responses','sectionExtras','customSections','vessels','appConfig'];
 
 /* Converts a Blob to a plain base64 string (no data: prefix) so a record
    containing photos can travel inside ordinary JSON. Async because
@@ -5489,7 +5945,7 @@ function sbUnpackFromSync(value){
 }
 
 function sbLocalKey(storeName, value){
-  return storeName==='responses' || storeName==='sectionExtras' ? value.key : value.id;
+  return storeName==='responses' || storeName==='sectionExtras' || storeName==='appConfig' ? value.key : value.id;
 }
 
 /* A short debounce so taking five photos in a row triggers one sync
@@ -5566,10 +6022,15 @@ function sbPullAll(){
       });
     });
     return chain.then(function(){
+      // A pulled row can include another device's checklist-template edit
+      // (store 'appConfig'), so refresh the in-memory SECTIONS from what's
+      // now on disk before deciding whether to re-render.
+      return loadSectionsTemplate();
+    }).then(function(){
       sbSyncState.status = 'idle';
       sbSyncState.lastSyncedAt = Date.now();
       renderSyncStatus();
-      if(state.view==='home') render();
+      if(['home','sections','section','report','manageChecklist','manageChecklistSection'].indexOf(state.view)>-1) render();
     });
   }).catch(function(err){
     sbSyncState.status = 'error'; sbSyncState.error = err;
@@ -5640,11 +6101,19 @@ function sbSignUp(email, password){
     if(sbUser) return sbPullAll().then(function(){ return sbPushLocalBacklog(); });
   });
 }
+/* Forgets the session locally no matter what — even when the network
+   call to revoke it server-side fails or hangs (e.g. this network blocks
+   Supabase entirely, as with the office Wi-Fi's DNS filtering). Staying
+   signed in against the person's wishes just because a request to tell
+   the server about it didn't get through would be a worse failure than
+   the sign-out being "incomplete" server-side; the session token still
+   expires on its own eventually either way. */
 function sbSignOut(){
-  return sb.auth.signOut().then(function(){
+  function forget(){
     sbUser = null;
     renderSyncStatus();
-  });
+  }
+  return sb.auth.signOut().then(forget).catch(forget);
 }
 function sbInitAuth(){
   if(!sb) return;
@@ -6580,15 +7049,20 @@ document.addEventListener('DOMContentLoaded', function(){
     if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function(){});
   } catch(e){}
   openDB().then(function(){
-    return initCloudSync().then(function(enabled){
-      return initUserRole().then(function(){
-        render();
-        if(enabled){
-          fullReconcile().then(function(){
-            if(state.view==='home' || state.view==='fleetStatus') render();
-          });
-        }
-        if(!enabled) sbInitAuth();
+    // Load any locally-saved checklist template (an admin's past edits)
+    // before the very first render, so nothing ever briefly shows the
+    // shipped-default checklist and then flips to the edited one.
+    return loadSectionsTemplate().then(function(){
+      return initCloudSync().then(function(enabled){
+        return initUserRole().then(function(){
+          render();
+          if(enabled){
+            fullReconcile().then(function(){
+              if(state.view==='home' || state.view==='fleetStatus') render();
+            });
+          }
+          if(!enabled) sbInitAuth();
+        });
       });
     });
   }).catch(function(err){
