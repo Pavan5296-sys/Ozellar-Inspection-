@@ -616,6 +616,23 @@ p.extras-hint.section-pad{margin:0 0 10px;padding:0 16px;}
 .sheet button.danger svg{color:var(--bad);}
 .sheet hr{border:none;border-top:1px solid var(--border);margin:4px 0;}
 
+.home-menu-backdrop{position:fixed;inset:0;z-index:90;background:transparent;}
+.home-menu-dropdown{
+  position:fixed;z-index:91;min-width:208px;
+  background:#fff;border:1px solid var(--border);border-radius:var(--radius);
+  box-shadow:0 10px 28px rgba(11,33,56,0.18);
+  padding:6px;
+}
+.home-menu-dropdown button{
+  display:flex;width:100%;align-items:center;gap:12px;padding:10px 12px;border:none;background:none;
+  font-size:14.5px;text-align:left;color:var(--ink);border-radius:8px;
+}
+.home-menu-dropdown button.danger{color:var(--bad);}
+.home-menu-dropdown button:active{background:var(--bg);}
+.home-menu-dropdown svg{width:18px;height:18px;flex:none;color:var(--muted);}
+.home-menu-dropdown button.danger svg{color:var(--bad);}
+.home-menu-dropdown hr{border:none;border-top:1px solid var(--border);margin:4px 0;}
+
 @media (prefers-reduced-motion: reduce){
   *{animation:none !important;transition:none !important;}
 }
@@ -1701,6 +1718,49 @@ function closeSheet(){
   var b = document.getElementById('sheetBackdrop'); if(b) b.remove();
   var s = document.getElementById('activeSheet'); if(s) s.remove();
 }
+/* A small anchored dropdown (as opposed to openSheet's full-width bottom
+   sheet) — pinned just under/near the button that opened it and never
+   drifting anywhere else on screen. Used for the Home menu, which sits in
+   the top-left corner and should behave like an ordinary desktop/mobile
+   dropdown, not slide up from the bottom. Position is computed in
+   viewport coordinates (position:fixed) so it stays put regardless of
+   page scroll, and a transparent full-screen backdrop below it just
+   catches the outside click that closes it. */
+function openDropdownMenu(anchorEl, items){
+  closeDropdownMenu();
+  var backdrop = document.createElement('div');
+  backdrop.className = 'home-menu-backdrop';
+  backdrop.id = 'homeMenuBackdrop';
+  var menu = document.createElement('div');
+  menu.className = 'home-menu-dropdown';
+  menu.id = 'activeHomeMenu';
+  menu.innerHTML = items.map(function(it, i){
+    if(it.divider) return '<hr>';
+    return '<button data-menu-idx="'+i+'" class="'+(it.danger?'danger':'')+'">'+(it.icon||'')+'<span>'+escapeHtml(it.label)+'</span></button>';
+  }).join('');
+  document.body.appendChild(backdrop);
+  document.body.appendChild(menu);
+  var r = anchorEl.getBoundingClientRect();
+  var top = r.bottom + 6;
+  var left = r.left;
+  // Keep it on screen if the button sits close to the right edge (narrow phones).
+  var maxLeft = window.innerWidth - menu.offsetWidth - 12;
+  if(left > maxLeft) left = Math.max(12, maxLeft);
+  menu.style.top = top+'px';
+  menu.style.left = left+'px';
+  backdrop.addEventListener('click', closeDropdownMenu);
+  menu.querySelectorAll('button[data-menu-idx]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var idx = parseInt(btn.getAttribute('data-menu-idx'),10);
+      closeDropdownMenu();
+      if(items[idx] && items[idx].onClick) items[idx].onClick();
+    });
+  });
+}
+function closeDropdownMenu(){
+  var b = document.getElementById('homeMenuBackdrop'); if(b) b.remove();
+  var m = document.getElementById('activeHomeMenu'); if(m) m.remove();
+}
 /* Custom confirmation dialog, used everywhere in place of the native
    confirm() — that native dialog is unreliable (silently blocked, in some
    hosting contexts) inside a sandboxed frame, which a published artifact
@@ -2432,9 +2492,9 @@ function renderHome(){
       '</div>';
     return '' +
     '<div class="home-header">'+
+      '<button class="icon-btn" id="btnHomeMenu" aria-label="Menu">'+ICONS.menu+'</button>'+
       '<div class="mark">'+ICONS.ship+'</div>'+
       '<div><div class="wordmark">Ozellar</div><div class="tagline">All Right Inspection</div></div>'+
-      '<button class="icon-btn" id="btnHomeMenu" style="margin-left:auto;" aria-label="Menu">'+ICONS.menu+'</button>'+
     '</div>'+
     syncStatusBarHTML()+
     (currentRole.type!=='admin' ? '<p class="footer-note" style="margin:0 0 10px;">Signed in as '+(isDirectorRole()?'Director':'Tech Manager')+(currentRole.name?' \u00b7 '+escapeHtml(currentRole.name):'')+'</p>' : '')+
@@ -2536,14 +2596,15 @@ function wireHome(){
   }
 
   var btnHomeMenu = document.getElementById('btnHomeMenu');
-  if(btnHomeMenu) btnHomeMenu.addEventListener('click', function(){
+  if(btnHomeMenu) btnHomeMenu.addEventListener('click', function(e){
+    e.stopPropagation();
     var items = [];
     if(isAdminRole() || isDirectorRole()) items.push({label:'Manage vessels', icon:ICONS.ship, onClick:function(){ navigate('vessels'); }});
     if(isAdminRole()) items.push({label:'Manage checklist', icon:ICONS.clipboard, onClick:function(){ navigate('manageChecklist'); }});
     if(isAdminRole()) items.push({label:'Manage users', icon:ICONS.users, onClick:function(){ navigate('manageUsers'); }});
     if(!isDirectorRole() && importInput) items.push({label:'Import backup', icon:ICONS.upload, onClick:function(){ importInput.click(); }});
     if(!items.length) return;
-    openSheet(items);
+    openDropdownMenu(btnHomeMenu, items);
   });
 }
 
