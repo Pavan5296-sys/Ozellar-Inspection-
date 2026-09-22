@@ -1523,7 +1523,8 @@ function render(){
   app.innerHTML = '<div class="loading">Loading…</div>';
   revokeAllURLs();
   var task;
-  if(state.view==='home') task = renderHome();
+  if(sbAuthGateActive()) task = Promise.resolve(renderAuthGateHTML());
+  else if(state.view==='home') task = renderHome();
   else if(state.view==='form') task = renderForm();
   else if(state.view==='vessels') task = renderVessels();
   else if(state.view==='vesselForm') task = renderVesselForm();
@@ -1653,11 +1654,12 @@ function syncStatusBarHTML(){
 }
 /* The Supabase-backed equivalent of the bar above, for when this page is
    running outside Claude's own artifact runtime (self-hosted, no
-   window.claude, syncEnabled always false there). Signed out shows a
-   compact login form right on the home screen — deliberately not a
-   separate screen or a blocking modal, since the app must stay fully
-   usable with zero signal and no login at all; this is only ever a way
-   to additionally enable sync, never a gate in front of the app itself. */
+   window.claude, syncEnabled always false there). This compact version
+   renders INSIDE the already-visible home screen once signed in (status
+   + Sync now + Sign out). Signed-OUT visitors never see this version —
+   see sbAuthGateActive()/renderAuthGateHTML() below, which show a
+   full-screen login instead and keep the rest of the app hidden until
+   sign-in succeeds. */
 function sbSyncBarHTML(){
   if(!sb) return '';
   if(!sbUser){
@@ -1713,6 +1715,63 @@ function wireSyncBar(){
   var btnSbSignOut = document.getElementById('btnSbSignOut');
   if(btnSbSignOut) btnSbSignOut.addEventListener('click', function(){ sbSignOut(); });
 }
+
+/* =====================================================================
+   LOGIN GATE — on the self-hosted build (this page running outside
+   Claude's own artifact runtime, i.e. syncEnabled is false), nothing in
+   the app is shown until someone is signed in. render()/wireCurrentView()
+   check sbAuthGateActive() first and, while it's true, show ONLY this
+   screen in place of whatever state.view would normally render — no
+   vessel list, no New inspection, nothing. The moment sign-in succeeds
+   sbUser becomes truthy, this stops being active, and the very next
+   render() (triggered from inside sbSignIn/sbSignUp via renderSyncStatus,
+   see below) shows the real app instead.
+   A signed-in session is cached locally by supabase-js, so this does NOT
+   require a live connection on every open — once someone has signed in
+   here at least once with signal, re-opening the app offline still finds
+   that cached session and skips straight past this screen, same as
+   before. It only blocks a visitor who has never signed in on this
+   device/browser, or who has signed out. */
+function sbAuthGateActive(){
+  return !!(sb && !syncEnabled && !sbUser);
+}
+function renderAuthGateHTML(){
+  var busy = sbSyncState.authBusy;
+  return '' +
+  '<div class="home-header" style="margin-top:48px;">'+
+    '<div class="mark">'+ICONS.ship+'</div>'+
+    '<div><div class="wordmark">Ozellar</div><div class="tagline">All Right Inspection</div></div>'+
+  '</div>'+
+  '<div class="section-pad" style="max-width:420px;margin:28px auto 0;">'+
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;display:flex;flex-direction:column;gap:12px;">'+
+      '<div style="font-weight:700;font-size:17px;color:var(--ink);">Sign in to continue</div>'+
+      '<div style="color:var(--faint);font-size:14px;">Sign in or create an account to open your company’s inspections.</div>'+
+      '<input type="email" id="gateEmail" placeholder="Email" autocomplete="username" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">'+
+      '<input type="password" id="gatePassword" placeholder="Password" autocomplete="current-password" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">'+
+      (sbSyncState.authError ? '<div style="color:var(--bad,#C1432A);font-size:13px;">'+escapeHtml(sbSyncState.authError)+'</div>' : '')+
+      '<button class="btn btn-primary" id="gateSignIn" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>'+(busy?'Please wait…':'Sign in')+'</button>'+
+      '<button class="btn btn-outline" id="gateSignUp" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>Create account</button>'+
+    '</div>'+
+  '</div>';
+}
+function wireAuthGate(){
+  var btnSignIn = document.getElementById('gateSignIn');
+  var btnSignUp = document.getElementById('gateSignUp');
+  var emailInput = document.getElementById('gateEmail');
+  var passInput = document.getElementById('gatePassword');
+  if(btnSignIn) btnSignIn.addEventListener('click', function(){
+    var email=(emailInput.value||'').trim(), pass=passInput.value||'';
+    if(!email || !pass){ sbSyncState.authError='Enter an email and password first.'; renderSyncStatus(); return; }
+    sbSignIn(email, pass);
+  });
+  if(btnSignUp) btnSignUp.addEventListener('click', function(){
+    var email=(emailInput.value||'').trim(), pass=passInput.value||'';
+    if(!email || !pass){ sbSyncState.authError='Enter an email and password first.'; renderSyncStatus(); return; }
+    if(pass.length<6){ sbSyncState.authError='Password should be at least 6 characters.'; renderSyncStatus(); return; }
+    sbSignUp(email, pass);
+  });
+}
+
 /* =====================================================================
    FLEET INSPECTION STATUS — cross-references the vessel list against
    inspection history to flag which vessels are due or overdue. Company
@@ -5282,7 +5341,8 @@ function wireCurrentView(){
   document.querySelectorAll('[data-action="home"]').forEach(function(el){ el.addEventListener('click', function(){ navigate('home'); }); });
   document.querySelectorAll('[data-action="back-to-sections"]').forEach(function(el){ el.addEventListener('click', function(){ navigate('sections', {inspectionId: state.inspectionId}); }); });
 
-  if(state.view==='home') wireHome();
+  if(sbAuthGateActive()) wireAuthGate();
+  else if(state.view==='home') wireHome();
   else if(state.view==='form') wireForm();
   else if(state.view==='vessels') wireVessels();
   else if(state.view==='vesselForm') wireVesselForm();
@@ -5609,8 +5669,16 @@ function sbInitAuth(){
    change (e.g. "Syncing…" to "Synced just now") doesn't interrupt
    whatever the person is doing elsewhere on the home screen. Falls back
    to a full render if the bar isn't there to find (rare — only right
-   after first navigating to the home screen, before its first paint). */
+   after first navigating to the home screen, before its first paint).
+   Whenever the login gate should be showing or should stop showing
+   (sign-in just succeeded, sign-out just happened, a cached session was
+   just found at startup), this always does a FULL render instead — the
+   in-place patch only ever touches the small sync bar itself, and that
+   would leave a stale, fully-populated home screen sitting behind it
+   (or a stale gate lingering after signing in), exactly what the gate
+   exists to prevent. */
 function renderSyncStatus(){
+  if(sbAuthGateActive()){ render(); return; }
   var el = document.querySelector('.sync-bar');
   if(el && state.view==='home'){
     var parent = el.parentNode;
