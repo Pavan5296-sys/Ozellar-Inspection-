@@ -220,16 +220,6 @@ input, textarea, .qtext, .fq, .frem, .remarks-wrap, .pr-freetext, .pr-q{
 }
 .user-search-result:active{background:var(--bg);}
 
-.preview-role-banner{
-  display:flex;align-items:center;justify-content:space-between;gap:10px;
-  background:#3A2E6E;color:#fff;padding:10px 16px;font-size:13px;font-weight:700;
-}
-.preview-role-banner button{
-  background:rgba(255,255,255,0.18);color:#fff;border:none;border-radius:20px;
-  padding:5px 12px;font-size:12px;font-weight:700;flex:none;
-}
-.preview-role-banner button:active{background:rgba(255,255,255,0.3);}
-
 .icon-btn{
   width:34px;height:34px;flex:none;border:none;background:transparent;color:var(--faint);
   display:flex;align-items:center;justify-content:center;border-radius:8px;
@@ -244,10 +234,6 @@ input, textarea, .qtext, .fq, .frem, .remarks-wrap, .pr-freetext, .pr-q{
 .empty-state svg{width:34px;height:34px;color:var(--faint);margin-bottom:10px;}
 .empty-state p{margin:0;font-size:14px;}
 
-.footer-links{
-  display:flex;justify-content:center;flex-wrap:wrap;gap:14px 18px;
-  padding:18px 16px 8px;font-size:12.5px;color:var(--muted);
-}
 .footer-note{text-align:center;font-size:11.5px;color:var(--faint);padding:0 24px;margin:0;}
 
 .sync-bar{
@@ -772,7 +758,9 @@ var ICONS = {
   warn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.8 2.5 20.2h19z"/><path d="M12 10v4.2M12 17.3h.01"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/></svg>',
   download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 11.5 12 16l4.5-4.5"/><path d="M5 19h14"/></svg>',
-  grip: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>'
+  grip: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
+  menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
+  users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><circle cx="17" cy="9" r="2.4"/><path d="M15.5 13.2c2.2.3 3.8 2 3.8 4.3"/></svg>'
 };
 
 /* =====================================================================
@@ -1666,15 +1654,6 @@ function render(){
 
   task.then(function(html){
     app.innerHTML = html;
-    if(previewRole){
-      var bannerLabel = previewRole.type==='director' ? 'Director' : 'Tech Manager';
-      var banner = document.createElement('div');
-      banner.className = 'preview-role-banner';
-      banner.innerHTML = 'Previewing as '+bannerLabel+' <button id="btnExitPreviewRole" type="button">Exit preview</button>';
-      app.insertBefore(banner, app.firstChild);
-      var exitBtn = document.getElementById('btnExitPreviewRole');
-      if(exitBtn) exitBtn.addEventListener('click', exitPreviewRole);
-    }
     wireCurrentView();
     try{ window.scrollTo(0,0); }catch(e){}
   }).catch(function(err){
@@ -2448,21 +2427,14 @@ function renderHome(){
       }).join('');
     }
     var actionRowHtml = isDirectorRole() ? '' : '' +
-      '<div class="section-pad fab-new" style="display:flex;gap:10px;">'+
-        '<button class="btn btn-primary" id="btnNewInspection" style="flex:1;">'+ICONS.plus+'New inspection</button>'+
-        (isAdminRole() ? '<button class="btn btn-outline" id="btnAddVesselHome" style="flex:0 0 auto;white-space:nowrap;">'+ICONS.plus+'Add new vessel</button>' : '')+
+      '<div class="section-pad fab-new">'+
+        '<button class="btn btn-primary btn-block" id="btnNewInspection">'+ICONS.plus+'New inspection</button>'+
       '</div>';
-    var footerLinksHtml = '<div class="footer-links">'+
-      (isAdminRole() || isDirectorRole() ? '<button class="btn-ghost" id="btnManageVessels">Manage vessels</button>' : '')+
-      (isAdminRole() ? '<button class="btn-ghost" id="btnManageChecklist">Manage checklist</button>' : '')+
-      (isAdminRole() ? '<button class="btn-ghost" id="btnManageUsers">Manage users</button>' : '')+
-      (!isDirectorRole() ? '<button class="btn-ghost" id="btnImportBackup">Import backup</button>' : '')+
-      (currentRole.type==='admin' && !previewRole ? '<button class="btn-ghost" id="btnPreviewRole">Preview as\u2026</button>' : '')+
-    '</div>';
     return '' +
     '<div class="home-header">'+
       '<div class="mark">'+ICONS.ship+'</div>'+
       '<div><div class="wordmark">Ozellar</div><div class="tagline">All Right Inspection</div></div>'+
+      '<button class="icon-btn" id="btnHomeMenu" style="margin-left:auto;" aria-label="Menu">'+ICONS.menu+'</button>'+
     '</div>'+
     syncStatusBarHTML()+
     (currentRole.type!=='admin' ? '<p class="footer-note" style="margin:0 0 10px;">Signed in as '+(isDirectorRole()?'Director':'Tech Manager')+(currentRole.name?' \u00b7 '+escapeHtml(currentRole.name):'')+'</p>' : '')+
@@ -2476,7 +2448,6 @@ function renderHome(){
       '</div>' : '')+
     '<div id="homeInspectionList">'+listHtml+'</div>'+
     (rows.length ? '<div class="empty-state" id="noHomeMatches" style="display:none;margin:6px 16px 16px;"><p>No vessel matches your search.</p></div>' : '')+
-    footerLinksHtml+
     '<p class="footer-note">'+(syncEnabled ? 'Synced to your account and available on your other devices. Export a backup for extra safekeeping.' : 'All data stays on this device. Export a backup regularly in case the browser data is cleared.')+'</p>'+
     (isDirectorRole() ? '' : '<input type="file" id="importFileInput" accept="application/json,.json" style="display:none">');
   });
@@ -2500,9 +2471,6 @@ function wireHome(){
 
   var btnNew = document.getElementById('btnNewInspection');
   if(btnNew) btnNew.addEventListener('click', function(){ navigate('form', {formMode:'new'}); });
-
-  var btnAddVesselHome = document.getElementById('btnAddVesselHome');
-  if(btnAddVesselHome) btnAddVesselHome.addEventListener('click', function(){ navigate('vesselForm', {vesselId: null}); });
 
   var btnFleetStatus = document.getElementById('btnFleetStatus');
   if(btnFleetStatus) btnFleetStatus.addEventListener('click', function(){ navigate('fleetStatus'); });
@@ -2552,22 +2520,8 @@ function wireHome(){
     });
   });
 
-  var btnManageVessels = document.getElementById('btnManageVessels');
-  if(btnManageVessels) btnManageVessels.addEventListener('click', function(){ navigate('vessels'); });
-
-  var btnManageChecklist = document.getElementById('btnManageChecklist');
-  if(btnManageChecklist) btnManageChecklist.addEventListener('click', function(){ navigate('manageChecklist'); });
-
-  var btnManageUsers = document.getElementById('btnManageUsers');
-  if(btnManageUsers) btnManageUsers.addEventListener('click', function(){ navigate('manageUsers'); });
-
-  var btnPreviewRole = document.getElementById('btnPreviewRole');
-  if(btnPreviewRole) btnPreviewRole.addEventListener('click', openPreviewRolePicker);
-
-  var importBtn = document.getElementById('btnImportBackup');
   var importInput = document.getElementById('importFileInput');
-  if(importBtn && importInput){
-    importBtn.addEventListener('click', function(){ importInput.click(); });
+  if(importInput){
     importInput.addEventListener('change', function(e){
       var file = e.target.files[0];
       importInput.value='';
@@ -2580,6 +2534,17 @@ function wireHome(){
       });
     });
   }
+
+  var btnHomeMenu = document.getElementById('btnHomeMenu');
+  if(btnHomeMenu) btnHomeMenu.addEventListener('click', function(){
+    var items = [];
+    if(isAdminRole() || isDirectorRole()) items.push({label:'Manage vessels', icon:ICONS.ship, onClick:function(){ navigate('vessels'); }});
+    if(isAdminRole()) items.push({label:'Manage checklist', icon:ICONS.clipboard, onClick:function(){ navigate('manageChecklist'); }});
+    if(isAdminRole()) items.push({label:'Manage users', icon:ICONS.users, onClick:function(){ navigate('manageUsers'); }});
+    if(!isDirectorRole() && importInput) items.push({label:'Import backup', icon:ICONS.upload, onClick:function(){ importInput.click(); }});
+    if(!items.length) return;
+    openSheet(items);
+  });
 }
 
 /* =====================================================================
@@ -6279,17 +6244,7 @@ function initUserRole(){
     return currentRole;
   });
 }
-/* Admin-only "preview as" — lets the real admin see the app exactly as a
-   Director or Tech Manager would, without touching any real role data or
-   changing their own actual access. Purely a rendering overlay: resets on
-   reload, and every role check below looks at effectiveRole() rather than
-   currentRole directly, so the whole app (not just Home) reflects the
-   preview. The launcher itself checks currentRole (the real role), never
-   effectiveRole(), so a real admin previewing a restricted role can always
-   still find the exit banner and never gets stuck seeing their own
-   preview as if it were reality. */
-var previewRole = null; // null, or {type, fleet}
-function effectiveRole(){ return previewRole || currentRole; }
+function effectiveRole(){ return currentRole; }
 function isAdminRole(){ return effectiveRole().type==='admin'; }
 function isDirectorRole(){ return effectiveRole().type==='director'; }
 function isTechManagerRole(){ return effectiveRole().type==='techManager'; }
@@ -6321,59 +6276,6 @@ function guardAdminOnly(){
   }
   return true;
 }
-function openPreviewRolePicker(){
-  openSheet([
-    {label:'Preview as Director', icon:ICONS.ship, onClick:function(){
-      previewRole = {type:'director', fleet:[]};
-      toast('Previewing as Director');
-      render();
-    }},
-    {label:'Preview as Tech Manager', icon:ICONS.ship, onClick:function(){
-      openTechManagerPreviewFleetPicker();
-    }}
-  ]);
-}
-function openTechManagerPreviewFleetPicker(){
-  getVessels().then(function(vessels){
-    var backdrop = document.createElement('div');
-    backdrop.className = 'sheet-backdrop';
-    backdrop.id = 'previewFleetBackdrop';
-    var panel = document.createElement('div');
-    panel.className = 'form-sheet';
-    panel.id = 'previewFleetPanel';
-    var rowsHtml = vessels.map(function(v){
-      return '<label class="fleet-check-row"><input type="checkbox" class="preview-fleet-checkbox" value="'+escapeHtml(v.name)+'"><span>'+escapeHtml(v.name)+'</span></label>';
-    }).join('');
-    panel.innerHTML = '' +
-      '<h3>Preview as Tech Manager</h3>'+
-      '<p class="footer-note" style="text-align:left;padding:0;margin-bottom:10px;">Pick which vessels to simulate as their fleet.</p>'+
-      '<div style="max-height:280px;overflow-y:auto;">'+(rowsHtml||'<p>No vessels yet.</p>')+'</div>'+
-      '<div class="form-actions">'+
-        '<button class="btn btn-outline" id="cancelPreviewFleet">Cancel</button>'+
-        '<button class="btn btn-primary" id="confirmPreviewFleet">Start preview</button>'+
-      '</div>';
-    document.body.appendChild(backdrop);
-    document.body.appendChild(panel);
-    function close(){ backdrop.remove(); panel.remove(); }
-    backdrop.addEventListener('click', close);
-    document.getElementById('cancelPreviewFleet').addEventListener('click', close);
-    document.getElementById('confirmPreviewFleet').addEventListener('click', function(){
-      var fleet = [];
-      panel.querySelectorAll('.preview-fleet-checkbox:checked').forEach(function(cb){ fleet.push(cb.value); });
-      if(!fleet.length){ toast('Pick at least one vessel'); return; }
-      previewRole = {type:'techManager', fleet:fleet};
-      close();
-      toast('Previewing as Tech Manager');
-      render();
-    });
-  });
-}
-function exitPreviewRole(){
-  previewRole = null;
-  toast('Back to your real role');
-  render();
-}
-
 function updateSyncStatusUI(){
   var textEl = document.getElementById('syncStatusText');
   var dotEl = textEl && textEl.parentElement ? textEl.parentElement.querySelector('.sync-dot') : null;
