@@ -5517,6 +5517,49 @@ function sbPullAll(){
   });
 }
 
+/* Runs once right after a successful sign-in or sign-up, AFTER sbPullAll
+   has already brought in anything newer from the cloud. Without this,
+   a device's data that existed BEFORE its very first sign-in on this
+   login would sit in its IndexedDB forever and never reach the shared
+   cloud copy: going-forward edits get pushed by idbPut's dirty-marking
+   hook (see sbMarkDirty calls there), but a record that predates that
+   hook ever running for this login has no other path to get pushed.
+   This is exactly the gap that let the phone and laptop each keep their
+   own separate pre-existing inspections after signing into the same
+   account — this closes it by comparing every local record's updatedAt
+   against a lightweight index of what the cloud already has, and
+   queuing (via the existing sbMarkDirty/sbPushDirty pipeline) anything
+   local that's missing from the cloud or newer than the cloud's copy.
+   Deletions are respected the same way: a cloud tombstone is just a row
+   with a deleted flag and its own updated_at, so a local record only
+   overrides it if the local edit is genuinely newer. */
+function sbPushLocalBacklog(){
+  if(!sb || !sbUser) return Promise.resolve();
+  return sb.from('records').select('store,key,updated_at,deleted').eq('user_id', sbUser.id).then(function(res){
+    var cloudIndex = {};
+    if(res.data){
+      res.data.forEach(function(row){ cloudIndex[row.store+'|'+row.key] = row; });
+    }
+    var chain = Promise.resolve();
+    SB_STORES.forEach(function(storeName){
+      chain = chain.then(function(){
+        return idbGetAll(storeName).then(function(records){
+          (records||[]).forEach(function(rec){
+            var key = sbLocalKey(storeName, rec);
+            if(!key) return;
+            var cloudRow = cloudIndex[storeName+'|'+key];
+            var localUpdated = rec.updatedAt||0;
+            if(!cloudRow || (cloudRow.updated_at||0) < localUpdated){
+              sbMarkDirty(storeName, key);
+            }
+          });
+        }).catch(function(){});
+      });
+    });
+    return chain;
+  }).catch(function(){});
+}
+
 function sbSignIn(email, password){
   sbSyncState.authBusy = true; sbSyncState.authError = null; renderSyncStatus();
   return sb.auth.signInWithPassword({email:email, password:password}).then(function(res){
@@ -5524,7 +5567,7 @@ function sbSignIn(email, password){
     if(res.error){ sbSyncState.authError = res.error.message; renderSyncStatus(); return; }
     sbUser = res.data.user;
     renderSyncStatus();
-    return sbPullAll();
+    return sbPullAll().then(function(){ return sbPushLocalBacklog(); });
   });
 }
 function sbSignUp(email, password){
@@ -5534,7 +5577,7 @@ function sbSignUp(email, password){
     if(res.error){ sbSyncState.authError = res.error.message; renderSyncStatus(); return; }
     sbUser = res.data.user;
     renderSyncStatus();
-    if(sbUser) return sbPullAll();
+    if(sbUser) return sbPullAll().then(function(){ return sbPushLocalBacklog(); });
   });
 }
 function sbSignOut(){
@@ -5552,7 +5595,11 @@ function sbInitAuth(){
   sb.auth.getSession().then(function(res){
     sbUser = (res.data && res.data.session) ? res.data.session.user : null;
     renderSyncStatus();
-    if(sbUser) sbPullAll();
+    /* Also reconciles any pre-existing local backlog on ordinary app
+       open (not just a fresh sign-in), so a device that was already
+       signed in before this backlog fix existed picks it up the next
+       time it's opened, without needing to sign out and back in. */
+    if(sbUser) sbPullAll().then(function(){ return sbPushLocalBacklog(); });
   }).catch(function(){});
   if(typeof window!=='undefined'){
     window.addEventListener('online', function(){ sbPushDirty(); sbPullAll(); });
