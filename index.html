@@ -716,13 +716,38 @@ function saveSectionsTemplate(){
    ("Section 3 of 75", PDF/report section headers, etc.) — always
    sequential and always matches what's on screen, even though sr itself
    is permanent and can end up out of sequence (a gap left by a deletion,
-   a newly added section sorting in wherever it was dropped). */
-function sectionDisplayNumber(section){ return SECTIONS.indexOf(section)+1; }
+   a newly added section sorting in wherever it was dropped). Pass the
+   specific list the section came from — the live master SECTIONS on the
+   Manage checklist screens, or a particular inspection's own frozen
+   sections everywhere else — since a section's position can differ
+   between the two. */
+function sectionDisplayNumber(section, sections){ return (sections||SECTIONS).indexOf(section)+1; }
 /* Looks up a question within a section by its permanent id — never by
    raw array position, since reordering or adding/deleting a sibling
    question moves positions around but never touches ids. */
 function findQuestionById(section, qId){
   return (section && section.q ? section.q : []).filter(function(p){ return p[2]===qId; })[0] || null;
+}
+/* Every inspection carries its OWN frozen copy of the checklist (insp.sections,
+   set once in createInspection). This is what makes an admin's later edit to
+   the live/master SECTIONS affect only NEW inspections, never one already
+   pending, in progress or completed. A handful of inspections can predate
+   this feature and have no .sections yet — ensureInspectionSections backfills
+   those the first time they're opened, freezing them at whatever the master
+   checklist happens to be right now (not retroactively at every future edit).
+   inspectionSections/inspectionTotal are the read-side helpers everything
+   else should use instead of touching insp.sections directly. */
+function ensureInspectionSections(insp){
+  if(!insp) return Promise.resolve(insp);
+  if(Array.isArray(insp.sections) && insp.sections.length) return Promise.resolve(insp);
+  insp.sections = cloneSections(SECTIONS);
+  return idbPut('inspections', insp).then(function(){ return insp; }).catch(function(){ return insp; });
+}
+function inspectionSections(insp){
+  return (insp && Array.isArray(insp.sections) && insp.sections.length) ? insp.sections : SECTIONS;
+}
+function inspectionTotal(sections){
+  return (sections||[]).reduce(function(acc,s){ return acc+s.q.length; }, 0);
 }
 
 /* =====================================================================
@@ -1176,7 +1201,15 @@ function createInspection(data){
     conclusion: '',
     status: 'in_progress',
     createdAt: now,
-    updatedAt: now
+    updatedAt: now,
+    /* A frozen copy of the checklist template as it stood at the moment
+       this inspection was created. Every screen for THIS inspection reads
+       from here, not from the live/admin-editable SECTIONS — so a later
+       checklist edit (add/rename/delete/reorder a section or question)
+       only ever affects new inspections created after that edit, never
+       this one, whatever its status (pending, in progress or completed).
+       See ensureInspectionSections/inspectionSections near SECTIONS. */
+    sections: cloneSections(SECTIONS)
   };
   return idbPut('inspections', insp).then(function(){ return insp; });
 }
@@ -1512,9 +1545,12 @@ function deleteCustomSection(inspectionId, id){
   });
 }
 /* Resolves a section identifier (a fixed section's numeric sr, or a custom
-   section's string id) to its display name, checking both sources. */
-function resolveSectionInfo(sectionKey, customSectionsList){
-  var fixed = SECTIONS.filter(function(s){ return s.sr===sectionKey; })[0];
+   section's string id) to its display name, checking both sources. `sections`
+   is the specific inspection's own frozen checklist (see inspectionSections) —
+   never the live/admin-editable SECTIONS, so a section renamed or deleted
+   later still resolves to what this inspection actually had at the time. */
+function resolveSectionInfo(sectionKey, customSectionsList, sections){
+  var fixed = (sections||SECTIONS).filter(function(s){ return s.sr===sectionKey; })[0];
   if(fixed) return {name:fixed.name, isCustom:false, key:fixed.sr};
   var cs = (customSectionsList||[]).filter(function(c){ return c.id===sectionKey; })[0];
   if(cs) return {name:cs.name, isCustom:true, key:cs.id};
@@ -1526,12 +1562,13 @@ function resolveSectionInfo(sectionKey, customSectionsList){
    through this function since other callers may want them, but neither of
    those two Observation list renderers displays them: the same photos are
    already shown once, against the same finding, in the Inspection done
-   report section. */
-function collectDeficiencyFindings(responses, extrasList, customSectionsList){
+   report section. `sections` is this inspection's own frozen checklist. */
+function collectDeficiencyFindings(responses, extrasList, customSectionsList, sections){
+  sections = sections || SECTIONS;
   var findings = [];
   responses.forEach(function(r){
     if(r.applicable===true && r.answer==='no'){
-      var section = SECTIONS.filter(function(s){return s.sr===r.sectionSr;})[0];
+      var section = sections.filter(function(s){return s.sr===r.sectionSr;})[0];
       var q = section ? findQuestionById(section, r.qIdx) : null;
       var qtext = q ? q[1] : '';
       findings.push({
@@ -1544,7 +1581,7 @@ function collectDeficiencyFindings(responses, extrasList, customSectionsList){
   (extrasList||[]).forEach(function(ex){
     (ex.customFindings||[]).forEach(function(cf){
       if(cf.answer==='no'){
-        var info = resolveSectionInfo(ex.sectionSr, customSectionsList);
+        var info = resolveSectionInfo(ex.sectionSr, customSectionsList, sections);
         findings.push({
           sectionName: info.name, sectionKey: info.key, isCustom: info.isCustom,
           refLabel:'Extra', qtext: cf.text||'(no description entered)', remarks:'',
@@ -1555,21 +1592,25 @@ function collectDeficiencyFindings(responses, extrasList, customSectionsList){
   });
   return findings;
 }
-function computeInspectionProgress(inspectionId){
-  return idbGetAllByIndex('responses','byInspection', inspectionId).then(function(list){
-    var done = 0, deficiencies = 0, photos = 0, applicableYes=0, applicableNo=0, notApplicable=0;
-    list.forEach(function(r){
-      if(isDecided(r)) done++;
-      if(r.applicable===false) notApplicable++;
-      if(r.applicable===true && r.answer==='yes') applicableYes++;
-      if(r.applicable===true && r.answer==='no'){ applicableNo++; deficiencies++; }
-      photos += (r.photos? r.photos.length : 0);
+function computeInspectionProgress(insp){
+  var inspectionId = insp && insp.id ? insp.id : insp;
+  return ensureInspectionSections(insp).then(function(fullInsp){
+    var total = fullInsp && Array.isArray(fullInsp.sections) ? inspectionTotal(fullInsp.sections) : TOTAL_QUESTIONS;
+    return idbGetAllByIndex('responses','byInspection', inspectionId).then(function(list){
+      var done = 0, deficiencies = 0, photos = 0, applicableYes=0, applicableNo=0, notApplicable=0;
+      list.forEach(function(r){
+        if(isDecided(r)) done++;
+        if(r.applicable===false) notApplicable++;
+        if(r.applicable===true && r.answer==='yes') applicableYes++;
+        if(r.applicable===true && r.answer==='no'){ applicableNo++; deficiencies++; }
+        photos += (r.photos? r.photos.length : 0);
+      });
+      return {
+        done: done, total: total, deficiencies: deficiencies, photos: photos,
+        applicableYes: applicableYes, applicableNo: applicableNo, notApplicable: notApplicable,
+        pending: total - done
+      };
     });
-    return {
-      done: done, total: TOTAL_QUESTIONS, deficiencies: deficiencies, photos: photos,
-      applicableYes: applicableYes, applicableNo: applicableNo, notApplicable: notApplicable,
-      pending: TOTAL_QUESTIONS - done
-    };
   });
 }
 function computeSectionCounts(responses){
@@ -2372,7 +2413,7 @@ function renderHome(){
       vessels = vessels.filter(function(v){ return vesselAllowedForRole(v.name); });
     }
     return Promise.all(list.map(function(insp){
-      return computeInspectionProgress(insp.id).then(function(p){ return {insp:insp, p:p}; });
+      return computeInspectionProgress(insp).then(function(p){ return {insp:insp, p:p}; });
     })).then(function(rows){ return {rows:rows, vessels:vessels, allInspections:list}; });
   }).then(function(bundle){
     var rows = bundle.rows, vessels = bundle.vessels, allInspections = bundle.allInspections;
@@ -3030,7 +3071,7 @@ function renderManageChecklist(){
       '<button class="btn btn-primary btn-block" id="btnAddChecklistSection">'+ICONS.plus+'Add section</button>'+
     '</div>'+
     '<div id="manageSectionsList">'+rows+'</div>'+
-    '<p class="footer-note">Drag '+ICONS.grip+' to reorder. Changes here apply to every inspection, including ones already in progress or finished — renaming or reordering just changes how a section or question is labelled and where it sits; deleting one removes it from the checklist everywhere but keeps any answers already recorded against it.</p>'
+    '<p class="footer-note">Drag '+ICONS.grip+' to reorder. Changes here only apply to inspections started after the change — any inspection already created (pending, in progress or completed) keeps showing the checklist exactly as it was when it was started.</p>'
   );
 }
 function persistSectionsAndRerender(){
@@ -3069,7 +3110,7 @@ function wireManageChecklist(){
           });
         }},
         {label:'Delete section', icon:ICONS.trash, danger:true, onClick:function(){
-          showConfirm('Delete "'+section.name+'" from the checklist? It disappears from every inspection’s section list, including past ones. Anything already recorded against it is kept, not deleted, but will no longer be shown.').then(function(ok){
+          showConfirm('Delete "'+section.name+'" from the checklist? Inspections already created keep this section exactly as it is now — this only removes it from inspections started from now on.').then(function(ok){
             if(!ok) return;
             SECTIONS = SECTIONS.filter(function(s){ return s.sr!==sr; });
             persistSectionsAndRerender().then(function(){ toast('Section deleted'); });
@@ -3170,7 +3211,7 @@ function wireManageChecklistSection(){
       openSheet([
         {label:'Edit question', icon:ICONS.edit, onClick: editThisQuestion},
         {label:'Delete question', icon:ICONS.trash, danger:true, onClick:function(){
-          showConfirm('Delete this question from "'+section.name+'"? It disappears from every inspection, including past ones. Any answer already recorded against it is kept, not deleted, but will no longer be shown.').then(function(ok){
+          showConfirm('Delete this question from "'+section.name+'"? Inspections already created keep this question exactly as it is now — this only removes it from inspections started from now on.').then(function(ok){
             if(!ok) return;
             section.q = section.q.filter(function(p){ return p[2]!==qId; });
             persistSectionsAndRerender().then(function(){ toast('Question deleted'); });
@@ -3191,7 +3232,7 @@ function wireManageChecklistSection(){
 
   var deleteBtn = document.getElementById('btnDeleteChecklistSection');
   if(deleteBtn) deleteBtn.addEventListener('click', function(){
-    showConfirm('Delete "'+section.name+'" from the checklist? It disappears from every inspection’s section list, including past ones. Anything already recorded against it is kept, not deleted, but will no longer be shown.').then(function(ok){
+    showConfirm('Delete "'+section.name+'" from the checklist? Inspections already created keep this section exactly as it is now — this only removes it from inspections started from now on.').then(function(ok){
       if(!ok) return;
       SECTIONS = SECTIONS.filter(function(s){ return s.sr!==sr; });
       saveSectionsTemplate().then(function(){ navigate('manageChecklist'); });
@@ -3362,8 +3403,13 @@ function backupReminderBarHTML(){
 }
 function renderSectionList(){
   return idbGet('inspections', state.inspectionId).then(function(insp){
-    if(insp && !guardVesselAccess(insp.vesselName)) return '<div class="loading">Redirecting\u2026</div>';
+    if(insp && !guardVesselAccess(insp.vesselName)) return null;
+    return ensureInspectionSections(insp);
+  }).then(function(insp){
+    if(!insp) return '<div class="loading">Redirecting\u2026</div>';
     currentInspDraft = insp;
+    var sections = inspectionSections(insp);
+    var sectionsTotal = inspectionTotal(sections);
     var hydrateCover = (insp && insp.vesselPhoto) ? hydratePhotoDataUrls([insp.vesselPhoto]) : Promise.resolve();
     return hydrateCover.then(function(){
     return Promise.all([
@@ -3381,7 +3427,7 @@ function renderSectionList(){
         extrasCountMap[ex.sectionSr] = (ex.customFindings||[]).length;
       });
 
-      var rows = SECTIONS.map(function(s, idx){
+      var rows = sections.map(function(s, idx){
         var done = counts[s.sr]||0, total = s.q.length;
         var badgeClass = done===0 ? '' : (done===total ? 'done' : 'partial');
         var displayNum = idx+1;
@@ -3404,7 +3450,7 @@ function renderSectionList(){
         '<button class="back" data-action="home">'+ICONS.back+'</button>'+
         '<div class="title-wrap"><h1>'+escapeHtml(insp.vesselName||'Unnamed vessel')+'</h1>'+
           '<p class="sub">'+fmtDate(insp.date)+'</p></div>'+
-        '<div class="meta"><strong>'+totalDone+'/'+TOTAL_QUESTIONS+'</strong>checked</div>'+
+        '<div class="meta"><strong>'+totalDone+'/'+sectionsTotal+'</strong>checked</div>'+
       '</div>'+
       backupReminderBarHTML()+
       '<div class="search-wrap section-pad">'+
@@ -3683,12 +3729,16 @@ function extrasBlockHTML(extras, headerLabel, hintText){
 
 function renderSectionDetail(){
   if(state.customSectionId) return renderCustomSectionDetail();
-  var section = SECTIONS.filter(function(s){ return s.sr===state.sectionSr; })[0];
-  return Promise.all([
-    idbGetAllByIndex('responses','byInspection', state.inspectionId),
-    getOrCreateSectionExtras(state.inspectionId, section.sr)
-  ]).then(function(results){
-    var all = results[0], extras = results[1];
+  return idbGet('inspections', state.inspectionId).then(function(insp){
+    return ensureInspectionSections(insp);
+  }).then(function(insp){
+    var sections = inspectionSections(insp);
+    var section = sections.filter(function(s){ return s.sr===state.sectionSr; })[0];
+    return Promise.all([
+      idbGetAllByIndex('responses','byInspection', state.inspectionId),
+      getOrCreateSectionExtras(state.inspectionId, section.sr)
+    ]).then(function(results){
+      var all = results[0], extras = results[1];
     var respMap = {};
     all.forEach(function(r){ if(r.sectionSr===section.sr) respMap[r.qIdx]=r; });
 
@@ -3721,7 +3771,7 @@ function renderSectionDetail(){
       return '' +
       '<div class="appbar">'+
         '<button class="back" data-action="back-to-sections">'+ICONS.back+'</button>'+
-        '<div class="title-wrap"><h1>'+escapeHtml(section.name)+'</h1><p class="sub">Section '+sectionDisplayNumber(section)+' of '+SECTIONS.length+'</p></div>'+
+        '<div class="title-wrap"><h1>'+escapeHtml(section.name)+'</h1><p class="sub">Section '+sectionDisplayNumber(section, sections)+' of '+sections.length+'</p></div>'+
         '<div class="meta" id="sectionProgressMeta"><strong>'+done+'/'+total+'</strong>done</div>'+
       '</div>'+
       '<div style="padding-top:14px;">'+
@@ -3729,6 +3779,7 @@ function renderSectionDetail(){
         cards+
         extrasBlockFooterHTML(extras, 'Additional findings', 'Add anything you noticed here that is not covered by the questions above.')+
       '</div>';
+    });
     });
   });
 }
@@ -4073,7 +4124,7 @@ function removePhotoFromCard(card, photoId){
    list to keep it a manageable size to search). */
 function buildPhotoMoveDestinations(customSectionsList){
   var dests = [];
-  SECTIONS.forEach(function(sec){
+  inspectionSections(currentInspDraft).forEach(function(sec){
     dests.push({
       kind:'section', sectionSr:sec.sr,
       mainLabel: sec.name, subLabel: 'General photos for this section',
@@ -4217,7 +4268,7 @@ function wireSingleThumb(thumb, card){
 function destinationFromCard(card){
   var mode = card.getAttribute('data-photo-mode');
   if(mode!=='question' && mode!=='section') return null;
-  var fixedSection = state.sectionSr!=null ? SECTIONS.filter(function(s){ return s.sr===state.sectionSr; })[0] : null;
+  var fixedSection = state.sectionSr!=null ? inspectionSections(currentInspDraft).filter(function(s){ return s.sr===state.sectionSr; })[0] : null;
   var sectionName = fixedSection ? fixedSection.name : 'This section';
   if(mode==='question'){
     return {
@@ -4433,11 +4484,16 @@ function getCurrentPhotoCount(ctx){
    VIEW: REPORT
    ===================================================================== */
 function renderReport(){
-  var insp;
+  var insp, sections, sectionsTotal;
   return idbGet('inspections', state.inspectionId).then(function(i){
     insp = i;
     if(insp && !guardVesselAccess(insp.vesselName)) return null;
     currentInspDraft = insp;
+    return ensureInspectionSections(insp);
+  }).then(function(fullInsp){
+    if(!fullInsp) return null;
+    sections = inspectionSections(fullInsp);
+    sectionsTotal = inspectionTotal(sections);
     return Promise.all([
       idbGetAllByIndex('responses','byInspection', state.inspectionId),
       idbGetAllByIndex('sectionExtras','byInspection', state.inspectionId),
@@ -4455,7 +4511,7 @@ function renderReport(){
       if(r.applicable===true && r.answer==='no') stats.deficiencies++;
       stats.photos += (r.photos? r.photos.length : 0);
     });
-    stats.pending = TOTAL_QUESTIONS - stats.done;
+    stats.pending = sectionsTotal - stats.done;
     extrasList.forEach(function(ex){
       stats.photos += (ex.photos? ex.photos.length : 0);
       (ex.customFindings||[]).forEach(function(cf){
@@ -4465,7 +4521,7 @@ function renderReport(){
       });
     });
 
-    var findings = collectDeficiencyFindings(responses, extrasList, customSectionsList);
+    var findings = collectDeficiencyFindings(responses, extrasList, customSectionsList, sections);
     var findingsHtml = findings.length ? findings.map(function(f){
       var openAttr = f.isCustom
         ? 'data-open-custom-section="'+escapeHtml(String(f.sectionKey))+'"'
@@ -4492,7 +4548,7 @@ function renderReport(){
         '<textarea id="reportSummary" placeholder="Write a summary of this inspection. This must be completed before the inspection can be marked complete.">'+escapeHtml(insp.summary||'')+'</textarea>'+
       '</div></div>'+
       '<div class="stat-grid">'+
-        '<div class="stat"><div class="n">'+TOTAL_QUESTIONS+'</div><div class="l">Total questions</div></div>'+
+        '<div class="stat"><div class="n">'+sectionsTotal+'</div><div class="l">Total questions</div></div>'+
         '<div class="stat ok"><div class="n">'+stats.ok+'</div><div class="l">Satisfactory</div></div>'+
         '<div class="stat bad"><div class="n">'+stats.deficiencies+'</div><div class="l">Observations</div></div>'+
         '<div class="stat"><div class="n">'+stats.notApplicable+'</div><div class="l">Not applicable</div></div>'+
@@ -4939,6 +4995,8 @@ function buildInspectionParticularsRows(insp){
   return rows;
 }
 function buildInspectionPDF(insp, responses, extrasList, customSectionsList, vessel){
+  var sections = inspectionSections(insp);
+  var sectionsTotal = inspectionTotal(sections);
   var jsPDFCtor = window.jspdf.jsPDF;
   var doc = new jsPDFCtor({unit:'mm', format:'a4'});
   logDiagnostic('pdf_generationStarted', {
@@ -5090,9 +5148,9 @@ function buildInspectionPDF(insp, responses, extrasList, customSectionsList, ves
       else if(r.applicable===true && r.answer==='yes') sumStats.ok++;
       else if(r.applicable===true && r.answer==='no') sumStats.bad++;
     });
-    var sumPending = TOTAL_QUESTIONS - (sumStats.ok+sumStats.bad+sumStats.na);
+    var sumPending = sectionsTotal - (sumStats.ok+sumStats.bad+sumStats.na);
     y = pdfStatCards(doc, [
-      {value:TOTAL_QUESTIONS, label:'Total questions', color:PDF_COLOR.navy},
+      {value:sectionsTotal, label:'Total questions', color:PDF_COLOR.navy},
       {value:sumStats.ok, label:'Satisfactory', color:PDF_COLOR.good},
       {value:sumStats.bad, label:'Observations', color:PDF_COLOR.bad},
       {value:sumStats.na, label:'Not applicable', color:PDF_COLOR.na},
@@ -5168,13 +5226,13 @@ function buildInspectionPDF(insp, responses, extrasList, customSectionsList, ves
       });
     }
 
-    SECTIONS.forEach(function(section){
+    sections.forEach(function(section){
       var extras = extrasMap[section.sr];
       var hasAny = (extras && ((extras.photos&&extras.photos.length) || (extras.customFindings&&extras.customFindings.length)));
       section.q.forEach(function(pair){ if(respMap[section.sr+'_'+pair[2]]) hasAny = true; });
       if(!hasAny) return;
       chain = chain.then(function(){
-        y = pdfSectionBand(doc, String(sectionDisplayNumber(section)).padStart(2,'0')+'.  '+section.name, y);
+        y = pdfSectionBand(doc, String(sectionDisplayNumber(section, sections)).padStart(2,'0')+'.  '+section.name, y);
       });
       renderGeneralPhotos(extras);
       section.q.forEach(function(pair){
@@ -5198,7 +5256,7 @@ function buildInspectionPDF(insp, responses, extrasList, customSectionsList, ves
     chain = chain.then(function(){
       doc.addPage(); y = PDF_MARGIN;
       y = pdfHeading(doc, 'Observation list', y);
-      var findings = collectDeficiencyFindings(responses, extrasList, customSectionsList);
+      var findings = collectDeficiencyFindings(responses, extrasList, customSectionsList, sections);
       if(!findings.length){
         doc.setFont('helvetica','italic'); doc.setFontSize(10.5); doc.setTextColor(140,140,140);
         y = pdfEnsureSpace(doc, y, 8);
@@ -5278,6 +5336,8 @@ function hidePdfGenerating(){
    work regardless of environment. */
 function showReportPreviewAndDownload(inspectionId){
   return idbGet('inspections', inspectionId).then(function(insp){
+    return ensureInspectionSections(insp);
+  }).then(function(insp){
     return Promise.all([
       idbGetAllByIndex('responses','byInspection', inspectionId),
       idbGetAllByIndex('sectionExtras','byInspection', inspectionId),
@@ -5346,6 +5406,7 @@ function buildStandaloneReportHTML(printInnerHtml, title){
 }
 
 function buildPrintableReport(insp, responses, extrasList, customSectionsList, vessel){
+  var sections = inspectionSections(insp);
   var respMap = {};
   responses.forEach(function(r){ respMap[r.sectionSr+'_'+r.qIdx] = r; });
   var extrasMap = {};
@@ -5458,7 +5519,7 @@ function buildPrintableReport(insp, responses, extrasList, customSectionsList, v
 
   /* ---- Page 4+: inspection done report (flat, no zone grouping) ---- */
   var sectionsHtml = '';
-  SECTIONS.forEach(function(section){
+  sections.forEach(function(section){
     var rowsHtml = '';
     var anyRow = false;
     var extras = extrasMap[section.sr];
@@ -5491,7 +5552,7 @@ function buildPrintableReport(insp, responses, extrasList, customSectionsList, v
     if(cfRows){ anyRow = true; rowsHtml += cfRows; }
 
     if(anyRow){
-      sectionsHtml += '<div class="pr-sec-h">'+escapeHtml(String(sectionDisplayNumber(section)).padStart(2,'0'))+'. '+escapeHtml(section.name)+'</div>'+rowsHtml;
+      sectionsHtml += '<div class="pr-sec-h">'+escapeHtml(String(sectionDisplayNumber(section, sections)).padStart(2,'0'))+'. '+escapeHtml(section.name)+'</div>'+rowsHtml;
     }
   });
   (customSectionsList||[]).forEach(function(cs){
@@ -5511,7 +5572,7 @@ function buildPrintableReport(insp, responses, extrasList, customSectionsList, v
   /* ---- Observation list (deficiencies) — no photos here: they're already
      shown against each finding in the Inspection done report section above,
      so repeating them here would just duplicate the same images. ---- */
-  var findings = collectDeficiencyFindings(responses, extrasList, customSectionsList);
+  var findings = collectDeficiencyFindings(responses, extrasList, customSectionsList, sections);
   var findingsHtml = findings.length ? findings.map(function(f){
     return '' +
       '<div class="pr-q">'+
@@ -5591,6 +5652,8 @@ function safeFileName(s){ return String(s||'inspection').replace(/[^a-z0-9]+/gi,
 function exportInspectionJSON(inspId){
   var insp;
   return idbGet('inspections', inspId).then(function(i){
+    return ensureInspectionSections(i);
+  }).then(function(i){
     insp = i;
     return Promise.all([
       idbGetAllByIndex('responses','byInspection', inspId),
@@ -5735,6 +5798,8 @@ function importInspectionJSON(file){
 function exportInspectionCSV(inspId){
   var insp;
   return idbGet('inspections', inspId).then(function(i){
+    return ensureInspectionSections(i);
+  }).then(function(i){
     insp = i;
     return Promise.all([
       idbGetAllByIndex('responses','byInspection', inspId),
@@ -5743,14 +5808,15 @@ function exportInspectionCSV(inspId){
     ]);
   }).then(function(results){
     var responses = results[0], extrasList = results[1], customSectionsList = results[2];
+    var sections = inspectionSections(insp);
     var respMap = {};
     responses.forEach(function(r){ respMap[r.sectionSr+'_'+r.qIdx] = r; });
     var extrasMap = {};
     extrasList.forEach(function(ex){ extrasMap[ex.sectionSr] = ex; });
 
     var rows = [['Sr','Section','Ref','Question','Applicable','Finding','Remarks','Corrective Action','Preventive Action','Photos']];
-    SECTIONS.forEach(function(section){
-      var displayNum = sectionDisplayNumber(section);
+    sections.forEach(function(section){
+      var displayNum = sectionDisplayNumber(section, sections);
       var extras = extrasMap[section.sr];
       if(extras && extras.photos && extras.photos.length){
         rows.push([displayNum, section.name, 'General', 'General section photos', '', '', '', '', '', extras.photos.length]);
