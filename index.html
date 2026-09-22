@@ -1987,7 +1987,7 @@ function renderAuthGateHTML(){
     '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;display:flex;flex-direction:column;gap:12px;">'+
       '<div style="font-weight:700;font-size:17px;color:var(--ink);">Sign in to continue</div>'+
       '<div style="color:var(--faint);font-size:14px;">Sign in or create an account to open your company’s inspections.</div>'+
-      '<input type="email" id="gateEmail" placeholder="Email" autocomplete="username" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">'+
+      '<input type="email" id="gateEmail" placeholder="Email" autocomplete="username" value="'+escapeHtml(sbSyncState.lastEmail||'')+'" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">'+
       '<input type="password" id="gatePassword" placeholder="Password" autocomplete="current-password" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">'+
       (sbSyncState.authError ? '<div style="color:var(--bad,#C1432A);font-size:13px;">'+escapeHtml(sbSyncState.authError)+'</div>' : '')+
       '<button class="btn btn-primary" id="gateSignIn" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>'+(busy?'Please wait…':'Sign in')+'</button>'+
@@ -2002,11 +2002,13 @@ function wireAuthGate(){
   var passInput = document.getElementById('gatePassword');
   if(btnSignIn) btnSignIn.addEventListener('click', function(){
     var email=(emailInput.value||'').trim(), pass=passInput.value||'';
+    sbSyncState.lastEmail = email;
     if(!email || !pass){ sbSyncState.authError='Enter an email and password first.'; renderSyncStatus(); return; }
     sbSignIn(email, pass);
   });
   if(btnSignUp) btnSignUp.addEventListener('click', function(){
     var email=(emailInput.value||'').trim(), pass=passInput.value||'';
+    sbSyncState.lastEmail = email;
     if(!email || !pass){ sbSyncState.authError='Enter an email and password first.'; renderSyncStatus(); return; }
     if(pass.length<6){ sbSyncState.authError='Password should be at least 6 characters.'; renderSyncStatus(); return; }
     sbSignUp(email, pass);
@@ -5992,7 +5994,7 @@ try{
 }catch(e){ sb = null; }
 
 var sbUser = null;
-var sbSyncState = { status:'idle', lastSyncedAt:null, error:null, authBusy:false, authError:null };
+var sbSyncState = { status:'idle', lastSyncedAt:null, error:null, authBusy:false, authError:null, lastEmail:'' };
 var SB_STORES = ['inspections','responses','sectionExtras','customSections','vessels','appConfig'];
 
 /* Converts a Blob to a plain base64 string (no data: prefix) so a record
@@ -6203,6 +6205,19 @@ function sbPushLocalBacklog(){
 function refreshRoleAndSync(){
   return initUserRole().then(function(){ renderSyncStatus(); });
 }
+/* Both sign-in and sign-up end in this same catch, on purpose: whatever
+   goes wrong after Supabase itself responds (a network drop mid-sync, an
+   unexpected error resolving the person's role, anything) must still
+   release authBusy and put the form back in front of the person with a
+   message — never leave "Please wait…" stuck forever with no way to
+   retry. A plain wrong password/email is already caught by the `res.error`
+   branch below and never reaches this; this is the belt-and-braces for
+   everything else. */
+function sbAuthFailSafe(err){
+  sbSyncState.authBusy = false;
+  sbSyncState.authError = (err && err.message) ? err.message : 'Something went wrong — please try again.';
+  renderSyncStatus();
+}
 function sbSignIn(email, password){
   sbSyncState.authBusy = true; sbSyncState.authError = null; renderSyncStatus();
   return sb.auth.signInWithPassword({email:email, password:password}).then(function(res){
@@ -6212,7 +6227,7 @@ function sbSignIn(email, password){
     return refreshRoleAndSync().then(function(){
       return sbPullAll().then(function(){ return sbPushLocalBacklog(); });
     });
-  });
+  }).catch(sbAuthFailSafe);
 }
 function sbSignUp(email, password){
   sbSyncState.authBusy = true; sbSyncState.authError = null; renderSyncStatus();
@@ -6223,7 +6238,7 @@ function sbSignUp(email, password){
     return refreshRoleAndSync().then(function(){
       if(sbUser) return sbPullAll().then(function(){ return sbPushLocalBacklog(); });
     });
-  });
+  }).catch(sbAuthFailSafe);
 }
 /* Forgets the session locally no matter what — even when the network
    call to revoke it server-side fails or hangs (e.g. this network blocks
