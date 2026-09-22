@@ -631,6 +631,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .boot-splash .bw{font-size:20px;font-weight:700;color:var(--ink);}
 
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
 <div id="app"><div class="boot-splash"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="24" cy="24" r="13"/><path d="M16.5 19.5a11 11 0 0 1 15 0"/></svg><div class="bw">Ozellar</div></div></div>
@@ -1033,6 +1034,9 @@ function idbPut(storeName, value){
     if((storeName==='responses'||storeName==='sectionExtras'||storeName==='customSections') && value.inspectionId){
       touchInspectionUpdatedAt(value.inspectionId);
     }
+    if(sb && sbUser && SB_STORES.indexOf(storeName)>-1){
+      sbMarkDirty(storeName, sbLocalKey(storeName, value));
+    }
     return result;
   });
 }
@@ -1235,6 +1239,7 @@ function deleteLocalInspectionData(id){
    a local tombstone, which is what makes the deletion eventually stick
    even if this first attempt fails while offline. */
 function pushTombstoneToCloud(id){
+  if(id && sb && sbUser) sbMarkDeleted('inspections', id);
   if(!syncEnabled || !cloudDb) return Promise.resolve();
   return cloudDb.doc('deleted_inspections/'+id).set({deletedAt: Date.now()}).then(function(){
     return Promise.all([
@@ -1272,6 +1277,7 @@ function deleteInspectionCascade(id){
    plain fire-and-forget push after every create/update is enough — no
    debounced "dirty" queue needed. Safe to no-op when sync isn't enabled. */
 function pushVesselToCloud(vessel){
+  if(vessel && sb && sbUser) sbMarkDirty('vessels', vessel.id);
   if(!syncEnabled || !cloudDb || !vessel) return Promise.resolve();
   var payload = {
     name: vessel.name||'', imo: vessel.imo||'', vesselType: vessel.vesselType||'',
@@ -1281,6 +1287,7 @@ function pushVesselToCloud(vessel){
   return cloudDb.doc('vessels/'+vessel.id).set(payload).catch(function(){});
 }
 function pushVesselTombstoneToCloud(id){
+  if(id && sb && sbUser) sbMarkDeleted('vessels', id);
   if(!syncEnabled || !cloudDb) return Promise.resolve();
   return cloudDb.doc('deleted_vessels/'+id).set({deletedAt: Date.now()}).then(function(){
     return cloudDb.doc('vessels/'+id).delete().catch(function(){});
@@ -1630,7 +1637,7 @@ function openLightbox(url){
    VIEW: HOME
    ===================================================================== */
 function syncStatusBarHTML(){
-  if(!syncEnabled) return '';
+  if(!syncEnabled) return sbSyncBarHTML();
   var dotClass = 'idle', label;
   if(syncState.status==='syncing'){ dotClass='syncing'; label='Syncing…'; }
   else if(syncState.status==='error'){ dotClass='error'; label='Sync error — will retry'; }
@@ -1643,6 +1650,68 @@ function syncStatusBarHTML(){
     '<span id="syncStatusText">'+escapeHtml(label)+'</span>'+
     '<button class="btn-ghost" id="btnSyncNow">Sync now</button>'+
   '</div>';
+}
+/* The Supabase-backed equivalent of the bar above, for when this page is
+   running outside Claude's own artifact runtime (self-hosted, no
+   window.claude, syncEnabled always false there). Signed out shows a
+   compact login form right on the home screen — deliberately not a
+   separate screen or a blocking modal, since the app must stay fully
+   usable with zero signal and no login at all; this is only ever a way
+   to additionally enable sync, never a gate in front of the app itself. */
+function sbSyncBarHTML(){
+  if(!sb) return '';
+  if(!sbUser){
+    return '' +
+    '<div class="sync-bar section-pad" style="flex-direction:column;align-items:stretch;gap:8px;">'+
+      '<div style="display:flex;align-items:center;gap:8px;">'+
+        '<span class="sync-dot idle"></span><span>Not syncing — sign in to sync across devices</span>'+
+      '</div>'+
+      '<input type="email" id="sbEmailInput" placeholder="Email" autocomplete="username" style="padding:8px 10px;border:1px solid var(--border,#ccc);border-radius:8px;">'+
+      '<input type="password" id="sbPasswordInput" placeholder="Password" autocomplete="current-password" style="padding:8px 10px;border:1px solid var(--border,#ccc);border-radius:8px;">'+
+      (sbSyncState.authError ? '<div style="color:var(--bad,#C1432A);font-size:13px;">'+escapeHtml(sbSyncState.authError)+'</div>' : '')+
+      '<div style="display:flex;gap:8px;">'+
+        '<button class="btn btn-primary" id="btnSbSignIn" style="flex:1;margin-left:0;" '+(sbSyncState.authBusy?'disabled':'')+'>'+(sbSyncState.authBusy?'Please wait…':'Sign in')+'</button>'+
+        '<button class="btn btn-outline" id="btnSbSignUp" style="flex:1;margin-left:0;" '+(sbSyncState.authBusy?'disabled':'')+'>Create account</button>'+
+      '</div>'+
+    '</div>';
+  }
+  var dotClass='idle', label;
+  if(sbSyncState.status==='syncing'){ dotClass='syncing'; label='Syncing…'; }
+  else if(sbSyncState.status==='error'){ dotClass='error'; label='Sync error — will retry'; }
+  else if(typeof navigator!=='undefined' && navigator.onLine===false){ dotClass='idle'; label='Offline — will sync when back online'; }
+  else if(sbSyncState.lastSyncedAt){ dotClass='synced'; label='Synced '+relativeTime(sbSyncState.lastSyncedAt); }
+  else { dotClass='idle'; label='Signed in — ready to sync'; }
+  return '' +
+  '<div class="sync-bar section-pad">'+
+    '<span class="sync-dot '+dotClass+'"></span>'+
+    '<span id="sbSyncStatusText" title="'+escapeHtml(sbUser.email||'')+'">'+escapeHtml(label)+'</span>'+
+    '<button class="btn-ghost" id="btnSbSyncNow">Sync now</button>'+
+    '<button class="btn-ghost" id="btnSbSignOut">Sign out</button>'+
+  '</div>';
+}
+function wireSyncBar(){
+  var btnSyncNow = document.getElementById('btnSyncNow');
+  if(btnSyncNow) btnSyncNow.addEventListener('click', function(){ if(syncEnabled) fullReconcile().then(function(){ if(state.view==='home') render(); }); });
+
+  var btnSignIn = document.getElementById('btnSbSignIn');
+  var btnSignUp = document.getElementById('btnSbSignUp');
+  var emailInput = document.getElementById('sbEmailInput');
+  var passInput = document.getElementById('sbPasswordInput');
+  if(btnSignIn) btnSignIn.addEventListener('click', function(){
+    var email=(emailInput.value||'').trim(), pass=passInput.value||'';
+    if(!email || !pass){ sbSyncState.authError='Enter an email and password first.'; renderSyncStatus(); return; }
+    sbSignIn(email, pass);
+  });
+  if(btnSignUp) btnSignUp.addEventListener('click', function(){
+    var email=(emailInput.value||'').trim(), pass=passInput.value||'';
+    if(!email || !pass){ sbSyncState.authError='Enter an email and password first.'; renderSyncStatus(); return; }
+    if(pass.length<6){ sbSyncState.authError='Password should be at least 6 characters.'; renderSyncStatus(); return; }
+    sbSignUp(email, pass);
+  });
+  var btnSbSyncNow = document.getElementById('btnSbSyncNow');
+  if(btnSbSyncNow) btnSbSyncNow.addEventListener('click', function(){ sbPushDirty(); sbPullAll(); });
+  var btnSbSignOut = document.getElementById('btnSbSignOut');
+  if(btnSbSignOut) btnSbSignOut.addEventListener('click', function(){ sbSignOut(); });
 }
 /* =====================================================================
    FLEET INSPECTION STATUS — cross-references the vessel list against
@@ -2166,6 +2235,8 @@ function filterHomeInspections(query){
 }
 
 function wireHome(){
+  wireSyncBar();
+
   var btnNew = document.getElementById('btnNewInspection');
   if(btnNew) btnNew.addEventListener('click', function(){ navigate('form', {formMode:'new'}); });
 
@@ -5263,6 +5334,249 @@ function initCloudSync(){
 }
 
 /* =====================================================================
+   SUPABASE SYNC — the cloud-sync block above only ever activates inside
+   Claude's own artifact runtime (it needs window.claude). This app is
+   also run as a plain self-hosted page (GitHub Pages, no window.claude
+   at all), which is why this second, independent sync path exists: it
+   talks to a Supabase project instead, gated behind a real login rather
+   than the hosting runtime's own account system. The two paths never run
+   at the same time in practice (one requires window.claude, the other
+   requires this page's own supabase-js script to have loaded), so they
+   don't fight over the same writes.
+
+   Design: one generic "records" table holds every store this app already
+   keeps locally (inspections, responses, sectionExtras, customSections,
+   vessels), keyed the same way IndexedDB already keys them, so syncing a
+   new field or store later never needs a schema change here. Photos
+   travel inside that same JSON payload as base64 (see packForSync /
+   unpackFromSync below) rather than a separate upload step — simpler to
+   get right first, at the cost of using more of the database's free-tier
+   storage than a separate file-storage approach would.
+   ===================================================================== */
+var SUPABASE_URL = 'https://dgbierhekwndcxrlyhja.supabase.co';
+var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRnYmllcmhla3duZGN4cmx5aGphIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAwMjQzNjUsImV4cCI6MjEwNTYwMDM2NX0.vpadiQskYEDpM7V5Pjb_lgyj388W50b0s9_XxSx6SWs';
+var sb = null;
+try{
+  if(typeof window!=='undefined' && window.supabase && typeof window.supabase.createClient==='function'){
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+}catch(e){ sb = null; }
+
+var sbUser = null;
+var sbSyncState = { status:'idle', lastSyncedAt:null, error:null, authBusy:false, authError:null };
+var SB_STORES = ['inspections','responses','sectionExtras','customSections','vessels'];
+
+/* Converts a Blob to a plain base64 string (no data: prefix) so a record
+   containing photos can travel inside ordinary JSON. Async because
+   reading a Blob's bytes always is, even though the encode step itself
+   is sync once the bytes are in hand. */
+function sbBlobToB64(blob){
+  return new Promise(function(resolve, reject){
+    var reader = new FileReader();
+    reader.onload = function(){
+      var result = reader.result || '';
+      var comma = result.indexOf(',');
+      resolve(comma>-1 ? result.slice(comma+1) : result);
+    };
+    reader.onerror = function(){ reject(reader.error); };
+    reader.readAsDataURL(blob);
+  });
+}
+function sbB64ToBlob(b64, type){
+  var bin = atob(b64);
+  var arr = new Uint8Array(bin.length);
+  for(var i=0;i<bin.length;i++){ arr[i] = bin.charCodeAt(i); }
+  return new Blob([arr], {type: type || 'image/jpeg'});
+}
+/* Deep-walks a record looking for Blob values (a photo's .blob field, a
+   vessel photo, anything nested inside customFindings[].photos[], etc.)
+   and replaces each with a small JSON-safe marker carrying its base64
+   bytes and mime type. Walking generically like this, rather than
+   hard-coding "photos" and "customFindings" paths, means a new field
+   added to the app later that happens to hold a Blob is still handled
+   correctly here without this function needing to change too. */
+function sbPackForSync(value){
+  if(value instanceof Blob){
+    return sbBlobToB64(value).then(function(b64){
+      return {__sbBlob:true, b64:b64, type:value.type||'image/jpeg'};
+    });
+  }
+  if(Array.isArray(value)){
+    return Promise.all(value.map(sbPackForSync));
+  }
+  if(value && typeof value==='object'){
+    var keys = Object.keys(value);
+    var out = {};
+    var chain = Promise.resolve();
+    keys.forEach(function(k){
+      chain = chain.then(function(){
+        return sbPackForSync(value[k]).then(function(packed){ out[k] = packed; });
+      });
+    });
+    return chain.then(function(){ return out; });
+  }
+  return Promise.resolve(value===undefined ? null : value);
+}
+function sbUnpackFromSync(value){
+  if(value && typeof value==='object'){
+    if(Array.isArray(value)) return value.map(sbUnpackFromSync);
+    if(value.__sbBlob) return sbB64ToBlob(value.b64, value.type);
+    var out = {};
+    Object.keys(value).forEach(function(k){ out[k] = sbUnpackFromSync(value[k]); });
+    return out;
+  }
+  return value;
+}
+
+function sbLocalKey(storeName, value){
+  return storeName==='responses' || storeName==='sectionExtras' ? value.key : value.id;
+}
+
+/* A short debounce so taking five photos in a row triggers one sync
+   round, not five — mirrors the existing markDirty/pushDirtyNow pattern
+   above for the same reason. */
+var sbDirtyQueue = {};
+var sbPushTimer = null;
+function sbMarkDirty(storeName, localKey){
+  if(!sb || !sbUser || !localKey) return;
+  sbDirtyQueue[storeName+'|'+localKey] = true;
+  if(sbPushTimer) clearTimeout(sbPushTimer);
+  sbPushTimer = setTimeout(sbPushDirty, 800);
+}
+function sbMarkDeleted(storeName, localKey){
+  if(!sb || !sbUser || !localKey) return Promise.resolve();
+  return sb.from('records').upsert({
+    user_id: sbUser.id, store: storeName, key: localKey,
+    data: {}, updated_at: Date.now(), deleted: true
+  }, {onConflict:'user_id,store,key'}).catch(function(){});
+}
+function sbPushDirty(){
+  if(!sb || !sbUser) return;
+  var items = Object.keys(sbDirtyQueue);
+  sbDirtyQueue = {};
+  if(!items.length) return;
+  sbSyncState.status = 'syncing';
+  renderSyncStatus();
+  var chain = Promise.resolve();
+  items.forEach(function(item){
+    var sep = item.indexOf('|');
+    var storeName = item.slice(0,sep), localKey = item.slice(sep+1);
+    chain = chain.then(function(){
+      return idbGet(storeName, localKey).catch(function(){ return null; }).then(function(rec){
+        if(!rec) return; // deleted locally since being queued; nothing to push
+        return sbPackForSync(rec).then(function(packed){
+          return sb.from('records').upsert({
+            user_id: sbUser.id, store: storeName, key: localKey,
+            data: packed, updated_at: rec.updatedAt || Date.now(), deleted: false
+          }, {onConflict:'user_id,store,key'});
+        });
+      }).catch(function(){
+        sbDirtyQueue[item] = true; // re-queue for the next retry
+      });
+    });
+  });
+  chain.then(function(){
+    sbSyncState.status = Object.keys(sbDirtyQueue).length ? 'error' : 'idle';
+    sbSyncState.lastSyncedAt = Date.now();
+    renderSyncStatus();
+  });
+}
+/* Pulls every row for this login and writes anything newer than the
+   local copy straight in with idbPutRaw — not idbPut — so pulling a
+   change down doesn't turn around and re-queue it as a local edit to
+   push straight back up. */
+function sbPullAll(){
+  if(!sb || !sbUser) return Promise.resolve();
+  sbSyncState.status = 'syncing';
+  renderSyncStatus();
+  return sb.from('records').select('*').eq('user_id', sbUser.id).then(function(res){
+    if(res.error || !res.data){ sbSyncState.status='error'; sbSyncState.error=res.error; renderSyncStatus(); return; }
+    var chain = Promise.resolve();
+    res.data.forEach(function(row){
+      chain = chain.then(function(){
+        return idbGet(row.store, row.key).catch(function(){ return null; }).then(function(local){
+          if(row.deleted){
+            if(local) return idbDelete(row.store, row.key).catch(function(){});
+            return;
+          }
+          if(local && (local.updatedAt||0) >= (row.updated_at||0)) return; // local is already current
+          var unpacked = sbUnpackFromSync(row.data);
+          return idbPutRaw(row.store, unpacked).catch(function(){});
+        });
+      });
+    });
+    return chain.then(function(){
+      sbSyncState.status = 'idle';
+      sbSyncState.lastSyncedAt = Date.now();
+      renderSyncStatus();
+      if(state.view==='home') render();
+    });
+  }).catch(function(err){
+    sbSyncState.status = 'error'; sbSyncState.error = err;
+    renderSyncStatus();
+  });
+}
+
+function sbSignIn(email, password){
+  sbSyncState.authBusy = true; sbSyncState.authError = null; renderSyncStatus();
+  return sb.auth.signInWithPassword({email:email, password:password}).then(function(res){
+    sbSyncState.authBusy = false;
+    if(res.error){ sbSyncState.authError = res.error.message; renderSyncStatus(); return; }
+    sbUser = res.data.user;
+    renderSyncStatus();
+    return sbPullAll();
+  });
+}
+function sbSignUp(email, password){
+  sbSyncState.authBusy = true; sbSyncState.authError = null; renderSyncStatus();
+  return sb.auth.signUp({email:email, password:password}).then(function(res){
+    sbSyncState.authBusy = false;
+    if(res.error){ sbSyncState.authError = res.error.message; renderSyncStatus(); return; }
+    sbUser = res.data.user;
+    renderSyncStatus();
+    if(sbUser) return sbPullAll();
+  });
+}
+function sbSignOut(){
+  return sb.auth.signOut().then(function(){
+    sbUser = null;
+    renderSyncStatus();
+  });
+}
+function sbInitAuth(){
+  if(!sb) return;
+  sb.auth.onAuthStateChange(function(event, session){
+    sbUser = session ? session.user : null;
+    renderSyncStatus();
+  });
+  sb.auth.getSession().then(function(res){
+    sbUser = (res.data && res.data.session) ? res.data.session.user : null;
+    renderSyncStatus();
+    if(sbUser) sbPullAll();
+  }).catch(function(){});
+  if(typeof window!=='undefined'){
+    window.addEventListener('online', function(){ sbPushDirty(); sbPullAll(); });
+  }
+}
+/* Re-renders just the sync bar in place when possible, so a status
+   change (e.g. "Syncing…" to "Synced just now") doesn't interrupt
+   whatever the person is doing elsewhere on the home screen. Falls back
+   to a full render if the bar isn't there to find (rare — only right
+   after first navigating to the home screen, before its first paint). */
+function renderSyncStatus(){
+  var el = document.querySelector('.sync-bar');
+  if(el && state.view==='home'){
+    var parent = el.parentNode;
+    var tmp = document.createElement('div');
+    tmp.innerHTML = syncStatusBarHTML();
+    var fresh = tmp.firstElementChild;
+    if(fresh){ parent.replaceChild(fresh, el); wireSyncBar(); }
+  } else if(state.view==='home'){
+    render();
+  }
+}
+
+/* =====================================================================
    ACCESS CONTROL — three roles on top of the shared data:
      admin        full control of everything (vessels, inspections, roles)
      director     sees every vessel and every report; changes nothing
@@ -6159,6 +6473,7 @@ document.addEventListener('DOMContentLoaded', function(){
             if(state.view==='home' || state.view==='fleetStatus') render();
           });
         }
+        if(!enabled) sbInitAuth();
       });
     });
   }).catch(function(err){
