@@ -2459,13 +2459,17 @@ function wireAssignUser(){
 
 function renderHome(){
   if(isUnassignedRole()){
+    var signedInEmail = (sb && sbUser && sbUser.email) ? sbUser.email : '';
     return Promise.resolve('' +
       '<div class="home-header">'+
         '<div class="mark">'+ICONS.ship+'</div>'+
         '<div><div class="wordmark">Ozellar</div><div class="tagline">All Right Inspection</div></div>'+
       '</div>'+
       '<div class="empty-state">'+ICONS.ship+
-        '<p>Hi'+(currentRole.name?' '+escapeHtml(currentRole.name):'')+'. You don\u2019t have access to this app yet.<br>Ask your admin to add you in Manage users.</p></div>'
+        '<p>Hi'+(currentRole.name?' '+escapeHtml(currentRole.name):'')+'. You don\u2019t have access to this app yet.<br>Ask your admin to add you in Manage users.</p>'+
+        (signedInEmail ? '<p style="color:var(--faint);font-size:13px;margin-top:2px;">Signed in as '+escapeHtml(signedInEmail)+'</p>' : '')+
+        (sb ? '<button class="btn-ghost" id="btnSbSignOut" style="margin-top:14px;">Not you? Sign out</button>' : '')+
+      '</div>'
     );
   }
   return Promise.all([getInspections(), getVessels()]).then(function(results){
