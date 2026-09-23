@@ -118,6 +118,15 @@ input, textarea, .qtext, .fq, .frem, .remarks-wrap, .pr-freetext, .pr-q{
 .home-header .mark{flex:none;width:42px;height:42px;color:var(--accent);}
 .home-header .wordmark{font-size:22px;font-weight:700;color:var(--ink);letter-spacing:0.2px;}
 .home-header .tagline{font-size:13px;color:var(--muted);margin-top:1px;}
+.avatar-btn{
+  flex:none;margin-left:auto;
+  width:34px;height:34px;border-radius:50%;
+  border:none;background:var(--accent);color:#fff;
+  font-weight:700;font-size:14px;line-height:1;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;
+}
+.avatar-btn:active{opacity:0.85;}
 
 /* ---------- Buttons ---------- */
 .btn{
@@ -632,6 +641,7 @@ p.extras-hint.section-pad{margin:0 0 10px;padding:0 16px;}
 .home-menu-dropdown svg{width:18px;height:18px;flex:none;color:var(--muted);}
 .home-menu-dropdown button.danger svg{color:var(--bad);}
 .home-menu-dropdown hr{border:none;border-top:1px solid var(--border);margin:4px 0;}
+.home-menu-header{padding:8px 14px;font-size:12.5px;color:var(--muted);word-break:break-all;}
 
 @media (prefers-reduced-motion: reduce){
   *{animation:none !important;transition:none !important;}
@@ -778,7 +788,8 @@ var ICONS = {
   grip: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
   menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
   users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><circle cx="17" cy="9" r="2.4"/><path d="M15.5 13.2c2.2.3 3.8 2 3.8 4.3"/></svg>',
-  mail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5.5" width="17" height="13" rx="1.5"/><path d="M4 7l8 6 8-6"/></svg>'
+  mail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5.5" width="17" height="13" rx="1.5"/><path d="M4 7l8 6 8-6"/></svg>',
+  signout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4.5H7a1.5 1.5 0 0 0-1.5 1.5v12A1.5 1.5 0 0 0 7 19.5h8"/><path d="M11 12h9.5M17.5 8.5 21 12l-3.5 3.5"/></svg>'
 };
 
 /* =====================================================================
@@ -1655,6 +1666,7 @@ function render(){
   revokeAllURLs();
   var task;
   if(sbAuthGateActive()) task = Promise.resolve(renderAuthGateHTML());
+  else if(sbPasswordSetupActive()) task = Promise.resolve(renderPasswordSetupHTML());
   else if(state.view==='home') task = renderHome();
   else if(state.view==='form') task = renderForm();
   else if(state.view==='vessels') task = renderVessels();
@@ -1737,6 +1749,7 @@ function openDropdownMenu(anchorEl, items){
   menu.id = 'activeHomeMenu';
   menu.innerHTML = items.map(function(it, i){
     if(it.divider) return '<hr>';
+    if(it.header!=null) return '<div class="home-menu-header">'+escapeHtml(it.header)+'</div>';
     return '<button data-menu-idx="'+i+'" class="'+(it.danger?'danger':'')+'">'+(it.icon||'')+'<span>'+escapeHtml(it.label)+'</span></button>';
   }).join('');
   document.body.appendChild(backdrop);
@@ -1914,7 +1927,6 @@ function sbSyncBarHTML(){
       (sbSyncState.authError ? '<div style="color:var(--bad,#C1432A);font-size:13px;">'+escapeHtml(sbSyncState.authError)+'</div>' : '')+
       '<div style="display:flex;gap:8px;">'+
         '<button class="btn btn-primary" id="btnSbSignIn" style="flex:1;margin-left:0;" '+(sbSyncState.authBusy?'disabled':'')+'>'+(sbSyncState.authBusy?'Please wait…':'Sign in')+'</button>'+
-        '<button class="btn btn-outline" id="btnSbSignUp" style="flex:1;margin-left:0;" '+(sbSyncState.authBusy?'disabled':'')+'>Create account</button>'+
       '</div>'+
     '</div>';
   }
@@ -1937,19 +1949,12 @@ function wireSyncBar(){
   if(btnSyncNow) btnSyncNow.addEventListener('click', function(){ if(syncEnabled) fullReconcile().then(function(){ if(state.view==='home') render(); }); });
 
   var btnSignIn = document.getElementById('btnSbSignIn');
-  var btnSignUp = document.getElementById('btnSbSignUp');
   var emailInput = document.getElementById('sbEmailInput');
   var passInput = document.getElementById('sbPasswordInput');
   if(btnSignIn) btnSignIn.addEventListener('click', function(){
     var email=(emailInput.value||'').trim(), pass=passInput.value||'';
     if(!email || !pass){ sbSyncState.authError='Enter an email and password first.'; renderSyncStatus(); return; }
     sbSignIn(email, pass);
-  });
-  if(btnSignUp) btnSignUp.addEventListener('click', function(){
-    var email=(emailInput.value||'').trim(), pass=passInput.value||'';
-    if(!email || !pass){ sbSyncState.authError='Enter an email and password first.'; renderSyncStatus(); return; }
-    if(pass.length<6){ sbSyncState.authError='Password should be at least 6 characters.'; renderSyncStatus(); return; }
-    sbSignUp(email, pass);
   });
   var btnSbSyncNow = document.getElementById('btnSbSyncNow');
   if(btnSbSyncNow) btnSbSyncNow.addEventListener('click', function(){ sbPushDirty(); sbPullAll(); });
@@ -1986,18 +1991,16 @@ function renderAuthGateHTML(){
   '<div class="section-pad" style="max-width:420px;margin:28px auto 0;">'+
     '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;display:flex;flex-direction:column;gap:12px;">'+
       '<div style="font-weight:700;font-size:17px;color:var(--ink);">Sign in to continue</div>'+
-      '<div style="color:var(--faint);font-size:14px;">Sign in or create an account to open your company’s inspections.</div>'+
+      '<div style="color:var(--faint);font-size:14px;">Sign in to open your company’s inspections. New here? Ask your admin to add you — you’ll get an email with a link to set up your account.</div>'+
       '<input type="email" id="gateEmail" placeholder="Email" autocomplete="username" value="'+escapeHtml(sbSyncState.lastEmail||'')+'" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">'+
       '<input type="password" id="gatePassword" placeholder="Password" autocomplete="current-password" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">'+
       (sbSyncState.authError ? '<div style="color:var(--bad,#C1432A);font-size:13px;">'+escapeHtml(sbSyncState.authError)+'</div>' : '')+
       '<button class="btn btn-primary" id="gateSignIn" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>'+(busy?'Please wait…':'Sign in')+'</button>'+
-      '<button class="btn btn-outline" id="gateSignUp" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>Create account</button>'+
     '</div>'+
   '</div>';
 }
 function wireAuthGate(){
   var btnSignIn = document.getElementById('gateSignIn');
-  var btnSignUp = document.getElementById('gateSignUp');
   var emailInput = document.getElementById('gateEmail');
   var passInput = document.getElementById('gatePassword');
   if(btnSignIn) btnSignIn.addEventListener('click', function(){
@@ -2006,13 +2009,64 @@ function wireAuthGate(){
     if(!email || !pass){ sbSyncState.authError='Enter an email and password first.'; renderSyncStatus(); return; }
     sbSignIn(email, pass);
   });
-  if(btnSignUp) btnSignUp.addEventListener('click', function(){
-    var email=(emailInput.value||'').trim(), pass=passInput.value||'';
-    sbSyncState.lastEmail = email;
-    if(!email || !pass){ sbSyncState.authError='Enter an email and password first.'; renderSyncStatus(); return; }
-    if(pass.length<6){ sbSyncState.authError='Password should be at least 6 characters.'; renderSyncStatus(); return; }
-    sbSignUp(email, pass);
+}
+
+/* =====================================================================
+   PASSWORD SETUP — a brand-new user only ever reaches this app via the
+   admin-triggered invite email (a Supabase magic link), which signs them
+   in without any password at all. This screen intercepts everything else
+   (same idea as the login gate above) exactly once, right after that
+   first sign-in, so they leave with a real password they can use to sign
+   in directly next time instead of needing a fresh email link every
+   time. sbNeedsPasswordSetup is set by initUserRole() from the
+   user_roles.password_set column, and cleared here once they've saved
+   one (see mark_password_set() in the setup SQL — a SECURITY DEFINER
+   function so a plain signed-in user can flip their own flag without
+   needing broader write access to user_roles).
+   ===================================================================== */
+function sbPasswordSetupActive(){
+  return !!(sb && sbUser && sbNeedsPasswordSetup);
+}
+function renderPasswordSetupHTML(){
+  var busy = sbSyncState.authBusy;
+  return '' +
+  '<div class="home-header" style="margin-top:48px;">'+
+    '<div class="mark">'+ICONS.ship+'</div>'+
+    '<div><div class="wordmark">Ozellar</div><div class="tagline">All Right Inspection</div></div>'+
+  '</div>'+
+  '<div class="section-pad" style="max-width:420px;margin:28px auto 0;">'+
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;display:flex;flex-direction:column;gap:12px;">'+
+      '<div style="font-weight:700;font-size:17px;color:var(--ink);">Create your password</div>'+
+      '<div style="color:var(--faint);font-size:14px;">You’re signed in as '+escapeHtml((sbUser&&sbUser.email)||'')+'. Set a password now so you can sign in directly next time, without waiting on a new email link.</div>'+
+      '<input type="password" id="pwSetupPassword" placeholder="New password" autocomplete="new-password" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">'+
+      '<input type="password" id="pwSetupPassword2" placeholder="Confirm password" autocomplete="new-password" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">'+
+      (sbSyncState.authError ? '<div style="color:var(--bad,#C1432A);font-size:13px;">'+escapeHtml(sbSyncState.authError)+'</div>' : '')+
+      '<button class="btn btn-primary" id="pwSetupSave" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>'+(busy?'Please wait…':'Save password')+'</button>'+
+      '<button class="btn-ghost" id="pwSetupSignOut" style="align-self:center;" '+(busy?'disabled':'')+'>Not you? Sign out</button>'+
+    '</div>'+
+  '</div>';
+}
+function wirePasswordSetup(){
+  var pw1 = document.getElementById('pwSetupPassword');
+  var pw2 = document.getElementById('pwSetupPassword2');
+  var saveBtn = document.getElementById('pwSetupSave');
+  var signOutBtn = document.getElementById('pwSetupSignOut');
+  if(saveBtn) saveBtn.addEventListener('click', function(){
+    var p1 = (pw1 && pw1.value) || '', p2 = (pw2 && pw2.value) || '';
+    if(p1.length<6){ sbSyncState.authError='Password should be at least 6 characters.'; renderSyncStatus(); return; }
+    if(p1!==p2){ sbSyncState.authError='Passwords don’t match.'; renderSyncStatus(); return; }
+    sbSyncState.authBusy = true; sbSyncState.authError = null; renderSyncStatus();
+    sb.auth.updateUser({password:p1}).then(function(res){
+      if(res.error){ sbSyncState.authBusy=false; sbSyncState.authError=res.error.message; renderSyncStatus(); return; }
+      return sb.rpc('mark_password_set').then(function(){
+        sbNeedsPasswordSetup = false;
+        sbSyncState.authBusy = false;
+        renderSyncStatus();
+        toast('Password set — you’re all set');
+      });
+    }).catch(sbAuthFailSafe);
   });
+  if(signOutBtn) signOutBtn.addEventListener('click', function(){ sbSignOut(); });
 }
 
 /* =====================================================================
@@ -2290,7 +2344,14 @@ function wireManageUsers(){
         {label:'Edit role', icon:ICONS.edit, onClick:function(){
           navigate('assignUser', {assignUserEmail:email, assignUserName:info.name, assignUserRole:info.role, assignUserFleet:info.fleet});
         }},
-        {label:'Copy invite message', icon:ICONS.mail, onClick:function(){
+        {label:'Resend invite email', icon:ICONS.mail, onClick:function(){
+          if(!sb){ toast('Not connected — try again in a moment'); return; }
+          toast('Sending…');
+          sbSendInviteEmail(email).then(function(res){
+            toast(res.error ? 'Could not send — try again' : 'Invite email sent');
+          }).catch(function(){ toast('Could not send — try again'); });
+        }},
+        {label:'Copy invite note', icon:ICONS.mail, onClick:function(){
           showInviteMessage(email, info.role, info.name);
         }},
         {label:'Remove access', icon:ICONS.trash, danger:true, onClick:function(){
@@ -2310,25 +2371,30 @@ function wireManageUsers(){
 /* Add/edit one person's role. There's no way to search Supabase's user
    directory from the browser with just the anon key, so an admin assigns
    a role by typing the exact email the person will sign in with (see
-   assignEmailInput below) rather than picking from a search result. */
+   assignEmailInput below) rather than picking from a search result.
+   There's also no "Create account" option anywhere in this app anymore —
+   the only way in is for an admin to add someone here, which
+   automatically emails that person a one-time sign-in link (see
+   wireAssignUser below); landing via that link is what puts them on the
+   "Create your password" screen the first time. */
 function inviteMessageFor(email, role, name){
   var roleLabel = role==='admin' ? 'Admin' : role==='director' ? 'Director' : role==='techManager' ? 'Tech Manager' : role==='vesselManager' ? 'Vessel Manager' : 'a user of';
-  var url = (typeof window!=='undefined' && window.location) ? (window.location.origin + window.location.pathname) : '';
   return 'Hi'+(name?' '+name:'')+',\n\n'+
     'You’ve been added to Ozellar All Right Inspection as '+(/^[aeiou]/i.test(roleLabel)?'an ':'a ')+roleLabel+'.\n\n'+
-    'Open the app and sign in — if you don’t have an account yet, choose "Create account" — using this exact email address:\n'+email+'\n\n'+
-    (url ? url+'\n\n' : '')+
-    'Your access is tied to this email, so please use it to sign up.';
+    'Check your email ('+email+') for a message with a link to set your password and get started. It can take a minute or two to arrive — worth checking spam/junk if you don’t see it.';
 }
-function showInviteMessage(email, role, name){
+function showInviteMessage(email, role, name, emailSent){
   var msg = inviteMessageFor(email, role, name);
   var backdrop = document.createElement('div');
   backdrop.className = 'sheet-backdrop';
   var panel = document.createElement('div');
   panel.className = 'form-sheet';
   panel.innerHTML = '' +
-    '<h3>Invite '+escapeHtml(name||email)+'</h3>'+
-    '<div class="field"><label>Send them this</label><textarea id="inviteMsgBox" rows="7" readonly style="width:100%;resize:vertical;">'+escapeHtml(msg)+'</textarea></div>'+
+    '<h3>'+(emailSent===false ? 'Couldn’t send the invite email' : 'Invite email sent')+'</h3>'+
+    (emailSent===false
+      ? '<p style="color:var(--bad,#C1432A);font-size:14px;">We couldn’t automatically email '+escapeHtml(email)+'. Try again with “Resend invite email” from their row in Manage users.</p>'
+      : '<p style="color:var(--faint);font-size:14px;">An email is on its way to '+escapeHtml(email)+' with a link to set their password.</p>')+
+    '<div class="field"><label>For your reference</label><textarea id="inviteMsgBox" rows="6" readonly style="width:100%;resize:vertical;">'+escapeHtml(msg)+'</textarea></div>'+
     '<div class="form-actions">'+
       '<button class="btn btn-outline" id="inviteCloseBtn">Close</button>'+
       '<button class="btn btn-primary" id="inviteCopyBtn">Copy</button>'+
@@ -2343,10 +2409,15 @@ function showInviteMessage(email, role, name){
     function manual(){ if(box){ box.focus(); box.select(); } toast('Selected — copy with Ctrl/Cmd+C'); }
     try{
       if(navigator.clipboard && navigator.clipboard.writeText){
-        navigator.clipboard.writeText(msg).then(function(){ toast('Invite message copied'); }).catch(manual);
+        navigator.clipboard.writeText(msg).then(function(){ toast('Copied'); }).catch(manual);
       } else manual();
     }catch(e){ manual(); }
   });
+}
+function sbSendInviteEmail(email){
+  if(!sb) return Promise.resolve({error:{message:'not connected'}});
+  var redirectTo = (typeof window!=='undefined' && window.location) ? (window.location.origin + window.location.pathname) : undefined;
+  return sb.auth.signInWithOtp({email:email, options:{shouldCreateUser:true, emailRedirectTo:redirectTo}});
 }
 function renderAssignUser(){
   if(!guardAdminOnly()) return Promise.resolve('<div class="loading">Redirecting…</div>');
@@ -2394,7 +2465,7 @@ function renderAssignUser(){
         '<button class="btn btn-outline" id="btnCancelAssign">Cancel</button>'+
         '<button class="btn btn-primary" id="btnSaveAssign">Save</button>'+
       '</div>'+
-      (isEdit ? '' : '<p class="footer-note" style="text-align:left;padding-top:12px;">After saving, you’ll get an invite message to send them — you can also copy it again later from their row.</p>')+
+      (isEdit ? '' : '<p class="footer-note" style="text-align:left;padding-top:12px;">After saving, we’ll automatically email them a link to set their password — no “create account” step needed on their end.</p>')+
     '</div>';
   });
 }
@@ -2449,10 +2520,20 @@ function wireAssignUser(){
     }, {onConflict:'email'}).then(function(res){
       saveBtn.disabled = false;
       if(res.error){ toast('Could not save — try again'); return; }
-      toast('Saved');
       var wasEdit = isEdit;
-      navigate('manageUsers');
-      if(!wasEdit) showInviteMessage(email, role, name);
+      if(wasEdit){
+        toast('Saved');
+        navigate('manageUsers');
+        return;
+      }
+      toast('Saved — sending invite email…');
+      sbSendInviteEmail(email).then(function(otpRes){
+        navigate('manageUsers');
+        showInviteMessage(email, role, name, !otpRes.error);
+      }).catch(function(){
+        navigate('manageUsers');
+        showInviteMessage(email, role, name, false);
+      });
     }).catch(function(){ saveBtn.disabled = false; toast('Could not save — try again'); });
   });
 }
@@ -2522,6 +2603,7 @@ function renderHome(){
       '<button class="icon-btn" id="btnHomeMenu" aria-label="Menu">'+ICONS.menu+'</button>'+
       '<div class="mark">'+ICONS.ship+'</div>'+
       '<div><div class="wordmark">Ozellar</div><div class="tagline">All Right Inspection</div></div>'+
+      (sb && sbUser ? '<button class="avatar-btn" id="btnUserAvatar" aria-label="Account" title="'+escapeHtml(sbUser.email||'')+'">'+escapeHtml(userAvatarInitial())+'</button>' : '')+
     '</div>'+
     syncStatusBarHTML()+
     (currentRole.type!=='admin' ? '<p class="footer-note" style="margin:0 0 10px;">Signed in as '+(isDirectorRole()?'Director':isTechManagerRole()?'Tech Manager':'Vessel Manager')+(currentRole.name?' \u00b7 '+escapeHtml(currentRole.name):'')+'</p>' : '')+
@@ -2632,6 +2714,16 @@ function wireHome(){
     if(!isDirectorRole() && importInput) items.push({label:'Import backup', icon:ICONS.upload, onClick:function(){ importInput.click(); }});
     if(!items.length) return;
     openDropdownMenu(btnHomeMenu, items);
+  });
+
+  var btnUserAvatar = document.getElementById('btnUserAvatar');
+  if(btnUserAvatar) btnUserAvatar.addEventListener('click', function(e){
+    e.stopPropagation();
+    openDropdownMenu(btnUserAvatar, [
+      {header: (sbUser&&sbUser.email) || ''},
+      {divider:true},
+      {label:'Sign out', icon:ICONS.signout, danger:true, onClick:function(){ sbSignOut(); }}
+    ]);
   });
 }
 
@@ -5915,6 +6007,7 @@ function wireCurrentView(){
   document.querySelectorAll('[data-action="back-to-sections"]').forEach(function(el){ el.addEventListener('click', function(){ navigate('sections', {inspectionId: state.inspectionId}); }); });
 
   if(sbAuthGateActive()) wireAuthGate();
+  else if(sbPasswordSetupActive()) wirePasswordSetup();
   else if(state.view==='home') wireHome();
   else if(state.view==='form') wireForm();
   else if(state.view==='vessels') wireVessels();
@@ -6291,23 +6384,28 @@ function sbInitAuth(){
    (or a stale gate lingering after signing in), exactly what the gate
    exists to prevent. */
 var sbGateWasActive = false;
+var sbPwSetupWasActive = false;
 function renderSyncStatus(){
   var gateNow = sbAuthGateActive();
-  if(gateNow || sbGateWasActive){
-    // Either the gate should be showing right now, or it just stopped
-    // being needed (a sign-in/sign-up just succeeded). Both are always a
-    // full render, even when state.view is left over from whatever
-    // screen was showing before the person got signed out — any screen
-    // that isn't right for the new role bounces itself back to Home via
-    // its own guardAdminOnly()/guardVesselAccess() check, same as
-    // navigating there directly would. Without this, a sign-in whose
-    // leftover view wasn't already 'home' left the gate stuck on screen
-    // even though sbUser (and currentRole) had actually moved on.
+  var pwNow = sbPasswordSetupActive();
+  if(gateNow || sbGateWasActive || pwNow || sbPwSetupWasActive){
+    // Either the login gate or the password-setup screen should be
+    // showing right now, or one of them just stopped being needed (a
+    // sign-in just succeeded, or a password was just saved). All of
+    // these are always a full render, even when state.view is left over
+    // from whatever screen was showing before — any screen that isn't
+    // right for the new role/state bounces itself back to Home via its
+    // own guardAdminOnly()/guardVesselAccess() check, same as navigating
+    // there directly would. Without this, a transition whose leftover
+    // view wasn't already 'home' left the old screen stuck in place even
+    // though sbUser/sbNeedsPasswordSetup had actually moved on.
     sbGateWasActive = gateNow;
+    sbPwSetupWasActive = pwNow;
     render();
     return;
   }
   sbGateWasActive = gateNow;
+  sbPwSetupWasActive = pwNow;
   var el = document.querySelector('.sync-bar');
   if(el && state.view==='home'){
     var parent = el.parentNode;
@@ -6344,6 +6442,10 @@ function renderSyncStatus(){
    ===================================================================== */
 var BOOTSTRAP_ADMIN_EMAIL = 'pavan.trivedi96@gmail.com';
 var currentRole = {type:'admin', fleet:null, userId:null, name:''};
+// True right after someone lands here via an admin-sent invite link and
+// hasn't chosen a password yet (see the PASSWORD SETUP section above).
+// Always re-derived by initUserRole() below, never set anywhere else.
+var sbNeedsPasswordSetup = false;
 function initUserRole(){
   // Artifact-hosted runtime (Claude's own window.claude capabilities) —
   // a separate, older role store from the Supabase one below. Only ever
@@ -6390,6 +6492,7 @@ function initUserRole(){
     // no Supabase script tag) — behave exactly as before this feature
     // existed rather than locking a local/offline session out.
     currentRole = {type:'admin', fleet:null, userId:null, name:''};
+    sbNeedsPasswordSetup = false;
     return Promise.resolve(currentRole);
   }
   var email = ((sbUser && sbUser.email) || '').trim().toLowerCase();
@@ -6397,22 +6500,32 @@ function initUserRole(){
     // Not signed in (yet) — the login gate normally covers this, but
     // keep a safe, access-nothing default in case it doesn't.
     currentRole = {type:'unassigned', fleet:[], userId:null, name:''};
+    sbNeedsPasswordSetup = false;
     return Promise.resolve(currentRole);
   }
   if(email===BOOTSTRAP_ADMIN_EMAIL){
     currentRole = {type:'admin', fleet:null, userId:sbUser.id, name:currentRole.name||''};
+    sbNeedsPasswordSetup = false;
     return Promise.resolve(currentRole);
   }
   return sb.from('user_roles').select('*').eq('email', email).maybeSingle().then(function(res){
     if(res.error || !res.data){
       currentRole = {type:'unassigned', fleet:[], userId:sbUser.id, name:''};
+      sbNeedsPasswordSetup = false;
       return currentRole;
     }
     var data = res.data;
     currentRole = {type:data.role||'unassigned', fleet:data.fleet||[], userId:sbUser.id, name:data.name||''};
+    // password_set is only ever explicitly false for a brand-new,
+    // admin-invited row that hasn't been through the password-setup
+    // screen yet; treat anything else (true, or missing on an older row
+    // this account somehow predates) as already set, never re-trap
+    // someone who already has a working password.
+    sbNeedsPasswordSetup = (data.password_set===false);
     return currentRole;
   }).catch(function(){
     currentRole = {type:'unassigned', fleet:[], userId:sbUser.id, name:''};
+    sbNeedsPasswordSetup = false;
     return currentRole;
   });
 }
@@ -6422,6 +6535,14 @@ function isDirectorRole(){ return effectiveRole().type==='director'; }
 function isTechManagerRole(){ return effectiveRole().type==='techManager'; }
 function isVesselManagerRole(){ return effectiveRole().type==='vesselManager'; }
 function isUnassignedRole(){ return effectiveRole().type==='unassigned'; }
+/* The single letter shown in the top-right account avatar — the person's
+   own name if the admin bothered to set one when assigning their role,
+   otherwise the first letter of their sign-in email, so there's always
+   something recognizable there. */
+function userAvatarInitial(){
+  var src = (currentRole.name||'').trim() || ((sbUser&&sbUser.email)||'').trim();
+  return src ? src.charAt(0).toUpperCase() : '?';
+}
 /* True for admin/director (see everything) and for a tech manager or
    vessel manager whose fleet includes this vessel name; false only
    narrows their own view down to their assigned ship(s). A tech manager's
