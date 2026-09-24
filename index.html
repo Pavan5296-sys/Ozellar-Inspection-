@@ -1927,6 +1927,7 @@ function sbSyncBarHTML(){
       (sbSyncState.authError ? '<div style="color:var(--bad,#C1432A);font-size:13px;">'+escapeHtml(sbSyncState.authError)+'</div>' : '')+
       '<div style="display:flex;gap:8px;">'+
         '<button class="btn btn-primary" id="btnSbSignIn" style="flex:1;margin-left:0;" '+(sbSyncState.authBusy?'disabled':'')+'>'+(sbSyncState.authBusy?'Please wait…':'Sign in')+'</button>'+
+        '<button class="btn btn-outline" id="btnSbSignUp" style="flex:1;margin-left:0;" '+(sbSyncState.authBusy?'disabled':'')+'>Create account</button>'+
       '</div>'+
     '</div>';
   }
@@ -1941,7 +1942,6 @@ function sbSyncBarHTML(){
     '<span class="sync-dot '+dotClass+'"></span>'+
     '<span id="sbSyncStatusText" title="'+escapeHtml(sbUser.email||'')+'">'+escapeHtml(label)+'</span>'+
     '<button class="btn-ghost" id="btnSbSyncNow">Sync now</button>'+
-    '<button class="btn-ghost" id="btnSbSignOut">Sign out</button>'+
   '</div>';
 }
 function wireSyncBar(){
@@ -1949,6 +1949,7 @@ function wireSyncBar(){
   if(btnSyncNow) btnSyncNow.addEventListener('click', function(){ if(syncEnabled) fullReconcile().then(function(){ if(state.view==='home') render(); }); });
 
   var btnSignIn = document.getElementById('btnSbSignIn');
+  var btnSignUp = document.getElementById('btnSbSignUp');
   var emailInput = document.getElementById('sbEmailInput');
   var passInput = document.getElementById('sbPasswordInput');
   if(btnSignIn) btnSignIn.addEventListener('click', function(){
@@ -1956,10 +1957,20 @@ function wireSyncBar(){
     if(!email || !pass){ sbSyncState.authError='Enter an email and password first.'; renderSyncStatus(); return; }
     sbSignIn(email, pass);
   });
+  if(btnSignUp) btnSignUp.addEventListener('click', function(){
+    var email=(emailInput.value||'').trim(), pass=passInput.value||'';
+    if(!email || !pass){ sbSyncState.authError='Enter an email and password first.'; renderSyncStatus(); return; }
+    if(pass.length<6){ sbSyncState.authError='Password should be at least 6 characters.'; renderSyncStatus(); return; }
+    sbSignUp(email, pass);
+  });
   var btnSbSyncNow = document.getElementById('btnSbSyncNow');
   if(btnSbSyncNow) btnSbSyncNow.addEventListener('click', function(){ sbPushDirty(); sbPullAll(); });
-  var btnSbSignOut = document.getElementById('btnSbSignOut');
-  if(btnSbSignOut) btnSbSignOut.addEventListener('click', function(){ sbSignOut(); });
+  // Sign-out lives in exactly one place now: the top-right account
+  // avatar menu (wireUserAvatarButton, called from wireHome() and
+  // wirePasswordSetup()) — every screen that has a confirmed sbUser
+  // shows that same avatar, including the "no access yet" screen and the
+  // password-setup screen, so there's no separate sign-out control here
+  // to wire anymore.
 }
 
 /* =====================================================================
@@ -1991,16 +2002,18 @@ function renderAuthGateHTML(){
   '<div class="section-pad" style="max-width:420px;margin:28px auto 0;">'+
     '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;display:flex;flex-direction:column;gap:12px;">'+
       '<div style="font-weight:700;font-size:17px;color:var(--ink);">Sign in to continue</div>'+
-      '<div style="color:var(--faint);font-size:14px;">Sign in to open your company’s inspections. New here? Ask your admin to add you — you’ll get an email with a link to set up your account.</div>'+
+      '<div style="color:var(--faint);font-size:14px;">Sign in or create an account to open your company’s inspections. Use the exact email your admin gave you access with.</div>'+
       '<input type="email" id="gateEmail" placeholder="Email" autocomplete="username" value="'+escapeHtml(sbSyncState.lastEmail||'')+'" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">'+
       '<input type="password" id="gatePassword" placeholder="Password" autocomplete="current-password" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">'+
       (sbSyncState.authError ? '<div style="color:var(--bad,#C1432A);font-size:13px;">'+escapeHtml(sbSyncState.authError)+'</div>' : '')+
       '<button class="btn btn-primary" id="gateSignIn" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>'+(busy?'Please wait…':'Sign in')+'</button>'+
+      '<button class="btn btn-outline" id="gateSignUp" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>Create account</button>'+
     '</div>'+
   '</div>';
 }
 function wireAuthGate(){
   var btnSignIn = document.getElementById('gateSignIn');
+  var btnSignUp = document.getElementById('gateSignUp');
   var emailInput = document.getElementById('gateEmail');
   var passInput = document.getElementById('gatePassword');
   if(btnSignIn) btnSignIn.addEventListener('click', function(){
@@ -2008,6 +2021,13 @@ function wireAuthGate(){
     sbSyncState.lastEmail = email;
     if(!email || !pass){ sbSyncState.authError='Enter an email and password first.'; renderSyncStatus(); return; }
     sbSignIn(email, pass);
+  });
+  if(btnSignUp) btnSignUp.addEventListener('click', function(){
+    var email=(emailInput.value||'').trim(), pass=passInput.value||'';
+    sbSyncState.lastEmail = email;
+    if(!email || !pass){ sbSyncState.authError='Enter an email and password first.'; renderSyncStatus(); return; }
+    if(pass.length<6){ sbSyncState.authError='Password should be at least 6 characters.'; renderSyncStatus(); return; }
+    sbSignUp(email, pass);
   });
 }
 
@@ -2033,24 +2053,24 @@ function renderPasswordSetupHTML(){
   '<div class="home-header" style="margin-top:48px;">'+
     '<div class="mark">'+ICONS.ship+'</div>'+
     '<div><div class="wordmark">Ozellar</div><div class="tagline">All Right Inspection</div></div>'+
+    (sb && sbUser ? '<button class="avatar-btn" id="btnUserAvatar" aria-label="Account" title="'+escapeHtml(sbUser.email||'')+'">'+escapeHtml(userAvatarInitial())+'</button>' : '')+
   '</div>'+
   '<div class="section-pad" style="max-width:420px;margin:28px auto 0;">'+
     '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;display:flex;flex-direction:column;gap:12px;">'+
       '<div style="font-weight:700;font-size:17px;color:var(--ink);">Create your password</div>'+
-      '<div style="color:var(--faint);font-size:14px;">You’re signed in as '+escapeHtml((sbUser&&sbUser.email)||'')+'. Set a password now so you can sign in directly next time, without waiting on a new email link.</div>'+
+      '<div style="color:var(--faint);font-size:14px;">You’re signed in as '+escapeHtml((sbUser&&sbUser.email)||'')+'. Set a password now so you can sign in directly next time, without waiting on a new email link. Not you? Use the icon above to sign out.</div>'+
       '<input type="password" id="pwSetupPassword" placeholder="New password" autocomplete="new-password" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">'+
       '<input type="password" id="pwSetupPassword2" placeholder="Confirm password" autocomplete="new-password" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">'+
       (sbSyncState.authError ? '<div style="color:var(--bad,#C1432A);font-size:13px;">'+escapeHtml(sbSyncState.authError)+'</div>' : '')+
       '<button class="btn btn-primary" id="pwSetupSave" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>'+(busy?'Please wait…':'Save password')+'</button>'+
-      '<button class="btn-ghost" id="pwSetupSignOut" style="align-self:center;" '+(busy?'disabled':'')+'>Not you? Sign out</button>'+
     '</div>'+
   '</div>';
 }
 function wirePasswordSetup(){
+  wireUserAvatarButton();
   var pw1 = document.getElementById('pwSetupPassword');
   var pw2 = document.getElementById('pwSetupPassword2');
   var saveBtn = document.getElementById('pwSetupSave');
-  var signOutBtn = document.getElementById('pwSetupSignOut');
   if(saveBtn) saveBtn.addEventListener('click', function(){
     var p1 = (pw1 && pw1.value) || '', p2 = (pw2 && pw2.value) || '';
     if(p1.length<6){ sbSyncState.authError='Password should be at least 6 characters.'; renderSyncStatus(); return; }
@@ -2066,7 +2086,6 @@ function wirePasswordSetup(){
       });
     }).catch(sbAuthFailSafe);
   });
-  if(signOutBtn) signOutBtn.addEventListener('click', function(){ sbSignOut(); });
 }
 
 /* =====================================================================
@@ -2372,16 +2391,19 @@ function wireManageUsers(){
    directory from the browser with just the anon key, so an admin assigns
    a role by typing the exact email the person will sign in with (see
    assignEmailInput below) rather than picking from a search result.
-   There's also no "Create account" option anywhere in this app anymore —
-   the only way in is for an admin to add someone here, which
-   automatically emails that person a one-time sign-in link (see
-   wireAssignUser below); landing via that link is what puts them on the
-   "Create your password" screen the first time. */
+   Someone new can get into the app two ways, both landing on the same
+   role once they're in: they can use "Create account" on the sign-in
+   screen themselves (with this exact email), or they can wait for /
+   tap the automatic invite email this triggers (see wireAssignUser
+   below) and set a password from that link instead. Either way, only an
+   email an admin has added here ever resolves to more than "no access
+   yet" — see initUserRole(). */
 function inviteMessageFor(email, role, name){
   var roleLabel = role==='admin' ? 'Admin' : role==='director' ? 'Director' : role==='techManager' ? 'Tech Manager' : role==='vesselManager' ? 'Vessel Manager' : 'a user of';
   return 'Hi'+(name?' '+name:'')+',\n\n'+
     'You’ve been added to Ozellar All Right Inspection as '+(/^[aeiou]/i.test(roleLabel)?'an ':'a ')+roleLabel+'.\n\n'+
-    'Check your email ('+email+') for a message with a link to set your password and get started. It can take a minute or two to arrive — worth checking spam/junk if you don’t see it.';
+    'Open the app and either sign in from the email link we just sent you, or use "Create account" with this exact email address:\n'+email+'\n\n'+
+    'Your access is tied to this email, so please use it exactly.';
 }
 function showInviteMessage(email, role, name, emailSent){
   var msg = inviteMessageFor(email, role, name);
@@ -2465,7 +2487,7 @@ function renderAssignUser(){
         '<button class="btn btn-outline" id="btnCancelAssign">Cancel</button>'+
         '<button class="btn btn-primary" id="btnSaveAssign">Save</button>'+
       '</div>'+
-      (isEdit ? '' : '<p class="footer-note" style="text-align:left;padding-top:12px;">After saving, we’ll automatically email them a link to set their password — no “create account” step needed on their end.</p>')+
+      (isEdit ? '' : '<p class="footer-note" style="text-align:left;padding-top:12px;">After saving, we’ll email them a sign-in link automatically — they can also just use “Create account” themselves with this same email.</p>')+
     '</div>';
   });
 }
@@ -2545,11 +2567,11 @@ function renderHome(){
       '<div class="home-header">'+
         '<div class="mark">'+ICONS.ship+'</div>'+
         '<div><div class="wordmark">Ozellar</div><div class="tagline">All Right Inspection</div></div>'+
+        (sb && sbUser ? '<button class="avatar-btn" id="btnUserAvatar" aria-label="Account" title="'+escapeHtml(signedInEmail)+'">'+escapeHtml(userAvatarInitial())+'</button>' : '')+
       '</div>'+
       '<div class="empty-state">'+ICONS.ship+
         '<p>Hi'+(currentRole.name?' '+escapeHtml(currentRole.name):'')+'. You don\u2019t have access to this app yet.<br>Ask your admin to add you in Manage users.</p>'+
-        (signedInEmail ? '<p style="color:var(--faint);font-size:13px;margin-top:2px;">Signed in as '+escapeHtml(signedInEmail)+'</p>' : '')+
-        (sb ? '<button class="btn-ghost" id="btnSbSignOut" style="margin-top:14px;">Not you? Sign out</button>' : '')+
+        (signedInEmail ? '<p style="color:var(--faint);font-size:13px;margin-top:2px;">Signed in as '+escapeHtml(signedInEmail)+' \u2014 wrong account? Use the icon above to sign out.</p>' : '')+
       '</div>'
     );
   }
@@ -2716,6 +2738,14 @@ function wireHome(){
     openDropdownMenu(btnHomeMenu, items);
   });
 
+  wireUserAvatarButton();
+}
+/* Shared by every screen that shows the top-right account avatar (normal
+   Home, the "no access yet" screen, and the password-setup screen) — one
+   single, consistent place sign-out lives across the whole app, instead
+   of a different-looking "sign out" control on each of them. Safe to
+   call whenever #btnUserAvatar may or may not be in the DOM. */
+function wireUserAvatarButton(){
   var btnUserAvatar = document.getElementById('btnUserAvatar');
   if(btnUserAvatar) btnUserAvatar.addEventListener('click', function(e){
     e.stopPropagation();
@@ -6332,7 +6362,15 @@ function sbSignUp(email, password){
     sbSyncState.authBusy = false;
     if(res.error){ sbSyncState.authError = res.error.message; renderSyncStatus(); return; }
     sbUser = res.data.user;
-    return refreshRoleAndSync().then(function(){
+    // They just chose their own password as part of creating this account,
+    // so there's nothing left for the "Create your password" screen to do
+    // — mark it done before resolving their role, so initUserRole() never
+    // routes them there right after they signed up. Best-effort: if the
+    // database hasn't been migrated to have this function yet, this just
+    // fails quietly and initUserRole() won't ask for a password anyway
+    // (see its password_set===false check).
+    var markDone = (sb.rpc ? sb.rpc('mark_password_set') : Promise.resolve()).catch(function(){});
+    return markDone.then(function(){ return refreshRoleAndSync(); }).then(function(){
       if(sbUser) return sbPullAll().then(function(){ return sbPushLocalBacklog(); });
     });
   }).catch(sbAuthFailSafe);
