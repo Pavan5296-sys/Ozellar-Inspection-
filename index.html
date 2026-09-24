@@ -459,6 +459,33 @@ p.extras-hint.section-pad{margin:0 0 10px;padding:0 16px;}
 }
 
 .photo-btns .btn-select-photos{flex:0 0 auto;}
+/* Defect photos: dark red frame + tag, everywhere a thumbnail is shown. */
+.thumb.defect{border:3px solid #8B0000;box-shadow:0 0 0 1px #8B0000;}
+.thumb.defect::before{
+  content:'DEFECT';position:absolute;left:0;right:0;bottom:0;z-index:1;
+  background:#8B0000;color:#fff;font-size:8.5px;font-weight:800;letter-spacing:.06em;
+  text-align:center;line-height:13px;pointer-events:none;
+}
+.thumb.defect.thumb-broken::before{content:'DEFECT';inset:auto 0 0 0;display:block;padding:0;}
+.photo-section-card .thumb{width:84px;height:84px;}
+.photo-section-card .seg-label{font-size:13px;}
+.photo-type-badge{
+  flex:none;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--accent-dark);background:var(--accent-tint);border-radius:6px;padding:3px 7px;margin-right:6px;
+}
+.badge.photos{background:var(--accent-tint);color:var(--accent-dark);}
+.badge .defect-n{color:#8B0000;font-weight:800;}
+.defect-choice .form-actions .btn{flex:1;}
+.btn-defect{background:#8B0000;color:#fff;border:1px solid #8B0000;}
+.btn-defect:active{background:#6d0000;}
+.section-type-options{display:flex;gap:8px;margin-top:6px;}
+.section-type-options label{
+  flex:1;border:1px solid var(--border);border-radius:10px;padding:10px;cursor:pointer;
+  display:flex;flex-direction:column;gap:2px;font-weight:600;font-size:14px;color:var(--ink);
+}
+.section-type-options label small{font-weight:400;font-size:12px;color:var(--muted);}
+.section-type-options input{margin:0 0 4px;}
+.section-type-options label:has(input:checked){border-color:var(--accent);background:var(--accent-tint);}
 .thumb-row:empty ~ .photo-btns .btn-select-photos{display:none;}
 .btn-select-photos .lbl-all{display:none;}
 body.photo-select-mode .btn-select-photos .lbl-select{display:none;}
@@ -475,17 +502,25 @@ body.photo-select-mode .thumb.selected img{opacity:0.78;}
 body.photo-select-mode .thumb.selected::after{
   background:var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center/12px no-repeat;
 }
-body.photo-select-mode{padding-bottom:calc(84px + env(safe-area-inset-bottom));}
+body.photo-select-mode{padding-bottom:calc(120px + env(safe-area-inset-bottom));}
 .photo-select-bar{
   position:fixed;left:0;right:0;bottom:0;z-index:55;background:var(--surface);
   border-top:1px solid var(--border);box-shadow:0 -4px 16px rgba(11,33,56,0.12);
-  display:flex;align-items:center;gap:8px;
-  padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+  display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+  padding:8px 12px calc(10px + env(safe-area-inset-bottom));
 }
-.photo-select-bar .psb-count{flex:1;font-weight:700;font-size:14.5px;color:var(--ink);min-width:0;}
-.photo-select-bar .psb-count small{display:block;font-weight:400;font-size:11.5px;color:var(--muted);}
-.photo-select-bar .btn{flex:none;}
+.photo-select-bar .icon-btn{flex:none;}
+.photo-select-bar .psb-count{flex:1 1 0;font-weight:700;font-size:14.5px;color:var(--ink);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.photo-select-bar .psb-count small{display:block;font-weight:400;font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;}
+.photo-select-bar .psb-actions{flex:1 0 100%;display:flex;gap:8px;}
+.photo-select-bar .psb-actions .btn{flex:1;white-space:nowrap;}
 .photo-select-bar .btn[disabled]{opacity:0.45;pointer-events:none;}
+@media (min-width:640px){
+  body.photo-select-mode{padding-bottom:calc(76px + env(safe-area-inset-bottom));}
+  .photo-select-bar{flex-wrap:nowrap;}
+  .photo-select-bar .psb-actions{flex:0 0 auto;}
+  .photo-select-bar .psb-actions .btn{flex:none;}
+}
 .thumb.drag-ghost .ghost-count{
   position:absolute;top:-2px;right:-2px;min-width:22px;height:22px;border-radius:11px;padding:0 6px;
   background:var(--accent);color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;
@@ -596,6 +631,8 @@ body.photo-select-mode .thumb.drag-ghost::after{display:none;}
 .pr-q .pr-rem{color:#444;margin-top:2px;}
 .pr-photos{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;}
 .pr-photos img{width:60px;height:60px;object-fit:cover;border:1px solid #ccc;}
+.pr-photos img.defect{border:3px solid #8B0000;}
+.pr-defect-legend{font-size:10px;color:#8B0000;font-weight:700;margin-top:2px;}
 
 /* ---------- Toast ---------- */
 .pdf-preview-overlay{
@@ -796,6 +833,15 @@ function ensureInspectionSections(insp){
 }
 function inspectionSections(insp){
   return (insp && Array.isArray(insp.sections) && insp.sections.length) ? insp.sections : SECTIONS;
+}
+/* A "photo section" holds photos only — no questions, no findings. Set by
+   an admin, either on the checklist template (sections[].photoOnly) or
+   directly on one inspection (customSections[].photoOnly). */
+var PHOTO_SECTION_MAX_PHOTOS = 100;
+function isPhotoOnlySection(sec){ return !!(sec && sec.photoOnly); }
+function defectNote(photos){
+  var n = (photos||[]).filter(function(p){ return p && p.defect; }).length;
+  return n ? ' ('+n+' defect'+(n>1?'s':'')+')' : '';
 }
 function inspectionTotal(sections){
   return (sections||[]).reduce(function(acc,s){ return acc+s.q.length; }, 0);
@@ -1581,8 +1627,9 @@ function updateExtras(inspectionId, sectionSr, mutateFn){
   return next;
 }
 
-function createCustomSection(inspectionId, name){
+function createCustomSection(inspectionId, name, photoOnly){
   var cs = {id:'cs_'+uid(), inspectionId:inspectionId, name:name, createdAt:Date.now(), updatedAt:Date.now()};
+  if(photoOnly) cs.photoOnly = true;
   return idbPut('customSections', cs).then(function(){ return cs; });
 }
 function getCustomSections(inspectionId){
@@ -3275,7 +3322,7 @@ function manageRowHTML(id, title, sub){
 }
 function renderManageChecklist(){
   var rows = SECTIONS.map(function(s){
-    return manageRowHTML(s.sr, s.name, s.q.length+(s.q.length===1?' question':' questions'));
+    return manageRowHTML(s.sr, s.name, isPhotoOnlySection(s) ? 'Photo section \u2014 photos only, no questions' : s.q.length+(s.q.length===1?' question':' questions'));
   }).join('');
   return Promise.resolve('' +
     '<div class="appbar">'+
@@ -3297,12 +3344,20 @@ function wireManageChecklist(){
 
   var addBtn = document.getElementById('btnAddChecklistSection');
   if(addBtn) addBtn.addEventListener('click', function(){
-    showPrompt('New section name', '', 'e.g. Forecastle Store').then(function(name){
-      if(!name) return;
-      var sr = sectionsNextSr++;
-      SECTIONS.push({sr: sr, zone: '', name: name, q: [], nextQid: 0});
-      persistSectionsAndRerender().then(function(){ toast('Section added'); });
-    });
+    function addSection(photoOnly){
+      showPrompt(photoOnly ? 'New photo section name' : 'New section name', '', photoOnly ? 'e.g. General photos / Defect photos' : 'e.g. Forecastle Store').then(function(name){
+        if(!name) return;
+        var sr = sectionsNextSr++;
+        var sec = {sr: sr, zone: '', name: name, q: [], nextQid: 0};
+        if(photoOnly) sec.photoOnly = true;
+        SECTIONS.push(sec);
+        persistSectionsAndRerender().then(function(){ toast(photoOnly ? 'Photo section added' : 'Section added'); });
+      });
+    }
+    openSheet([
+      {label:'Checklist section (with questions)', icon:ICONS.clipboard, onClick:function(){ addSection(false); }},
+      {label:'Photo section (photos only)', icon:ICONS.camera, onClick:function(){ addSection(true); }}
+    ]);
   });
 
   document.querySelectorAll('#manageSectionsList [data-reorder-id]').forEach(function(row){
@@ -3369,11 +3424,13 @@ function renderManageChecklistSection(){
     '<div class="section-pad" style="display:flex;gap:10px;">'+
       '<button class="btn btn-outline" id="btnRenameChecklistSection" style="flex:1;">'+ICONS.edit+'Rename section</button>'+
     '</div>'+
-    '<div class="section-pad fab-new">'+
-      '<button class="btn btn-primary btn-block" id="btnAddChecklistQuestion">'+ICONS.plus+'Add question</button>'+
-    '</div>'+
-    '<div id="manageQuestionsList">'+rows+'</div>'+
-    (section.q.length ? '<p class="footer-note">Drag '+ICONS.grip+' to reorder.</p>' : '<div class="empty-state" style="margin:6px 16px 16px;"><p>No questions in this section yet.</p></div>')+
+    (isPhotoOnlySection(section)
+      ? '<div class="empty-state" style="margin:6px 16px 16px;"><p><strong>Photo section.</strong><br>This section holds photos only \u2014 inspectors will see Take photo / Upload photos here, with the option to mark each photo as a defect.</p></div>'
+      : '<div class="section-pad fab-new">'+
+          '<button class="btn btn-primary btn-block" id="btnAddChecklistQuestion">'+ICONS.plus+'Add question</button>'+
+        '</div>'+
+        '<div id="manageQuestionsList">'+rows+'</div>'+
+        (section.q.length ? '<p class="footer-note">Drag '+ICONS.grip+' to reorder.</p>' : '<div class="empty-state" style="margin:6px 16px 16px;"><p>No questions in this section yet.</p></div>'))+
     '<div class="section-pad" style="margin:8px 0 24px;">'+
       '<button class="delete-link" id="btnDeleteChecklistSection">Delete this section</button>'+
     '</div>'
@@ -3436,7 +3493,7 @@ function wireManageChecklistSection(){
     });
   });
 
-  wireReorderableList(document.getElementById('manageQuestionsList'), function(newOrderIds){
+  if(document.getElementById('manageQuestionsList')) wireReorderableList(document.getElementById('manageQuestionsList'), function(newOrderIds){
     var byId = {};
     section.q.forEach(function(p){ byId[p[2]] = p; });
     var reordered = newOrderIds.map(function(id){ return byId[parseInt(id,10)]; }).filter(Boolean);
@@ -3546,14 +3603,15 @@ function wireVesselForm(){
 /* =====================================================================
    VIEW: SECTION LIST
    ===================================================================== */
-function customSectionRowHTML(cs, itemCount){
-  var searchText = (cs.name+' custom').toLowerCase();
+function customSectionRowHTML(cs, itemCount, badgeHtml){
+  var photoOnly = isPhotoOnlySection(cs);
+  var searchText = (cs.name+(photoOnly?' photos':' custom')).toLowerCase();
   return '' +
   '<div class="section-row" data-open-custom-section="'+cs.id+'" data-search="'+escapeHtml(searchText)+'">'+
     '<div class="bar"></div>'+
-    '<div class="custom-tag">Custom</div>'+
+    '<div class="custom-tag">'+(photoOnly?'Photos':'Custom')+'</div>'+
     '<div class="name">'+escapeHtml(cs.name)+'</div>'+
-    '<div class="badge">'+itemCount+'</div>'+
+    (badgeHtml || '<div class="badge">'+itemCount+'</div>')+
     '<button class="icon-btn" data-del-custom-section="'+cs.id+'" aria-label="Remove section">'+ICONS.trash+'</button>'+
   '</div>';
 }
@@ -3637,27 +3695,34 @@ function renderSectionList(){
       var totalDone = 0;
       responses.forEach(function(r){ if(isDecided(r)) totalDone++; });
 
-      var extrasCountMap = {};
+      var extrasCountMap = {}, photoCountMap = {};
       extrasList.forEach(function(ex){
         extrasCountMap[ex.sectionSr] = (ex.customFindings||[]).length;
+        var ph = ex.photos||[];
+        photoCountMap[ex.sectionSr] = {n: ph.length, d: ph.filter(function(p){ return p && p.defect; }).length};
       });
+      function photoBadgeHTML(key){
+        var c = photoCountMap[key] || {n:0, d:0};
+        return '<div class="badge photos">'+c.n+' photo'+(c.n===1?'':'s')+
+          (c.d ? ' \u00b7 <span class="defect-n">'+c.d+' defect'+(c.d===1?'':'s')+'</span>' : '')+'</div>';
+      }
 
       var rows = sections.map(function(s, idx){
         var done = counts[s.sr]||0, total = s.q.length;
         var badgeClass = done===0 ? '' : (done===total ? 'done' : 'partial');
         var displayNum = idx+1;
-        var searchText = (String(displayNum)+' '+s.name).toLowerCase();
+        var searchText = (String(displayNum)+' '+s.name+(isPhotoOnlySection(s)?' photos':'')).toLowerCase();
         return '' +
         '<button class="section-row" data-open-section="'+s.sr+'" data-search="'+escapeHtml(searchText)+'">'+
           '<div class="bar"></div>'+
           '<div class="num">'+String(displayNum).padStart(2,'0')+'</div>'+
           '<div class="name">'+escapeHtml(s.name)+'</div>'+
-          '<div class="badge '+badgeClass+'">'+done+'/'+total+'</div>'+
+          (isPhotoOnlySection(s) ? photoBadgeHTML(s.sr) : '<div class="badge '+badgeClass+'">'+done+'/'+total+'</div>')+
           '<div class="chev">'+ICONS.chevron+'</div>'+
         '</button>';
       }).join('');
       var customRows = customSectionsList.map(function(cs){
-        return customSectionRowHTML(cs, extrasCountMap[cs.id]||0);
+        return customSectionRowHTML(cs, extrasCountMap[cs.id]||0, isPhotoOnlySection(cs) ? photoBadgeHTML(cs.id) : null);
       }).join('');
 
       return '' +
@@ -3797,6 +3862,11 @@ function openAddSectionModal(){
     '<h3>Add a section</h3>'+
     '<div class="field"><label>Section name</label>'+
       '<input type="text" id="newSectionName" placeholder="e.g. Forecastle store"></div>'+
+    (isAdminRole() ? '' +
+      '<div class="field"><label>Section type</label><div class="section-type-options">'+
+        '<label><input type="radio" name="newSectionType" value="findings" checked>Findings section<small>Observations with photos</small></label>'+
+        '<label><input type="radio" name="newSectionType" value="photos">Photo section<small>Photos only, mark defects</small></label>'+
+      '</div></div>' : '')+
     '<div class="form-actions">'+
       '<button class="btn btn-outline" id="cancelAddSection">Cancel</button>'+
       '<button class="btn btn-primary" id="confirmAddSection">Add section</button>'+
@@ -3812,7 +3882,9 @@ function openAddSectionModal(){
   document.getElementById('confirmAddSection').addEventListener('click', function(){
     var name = nameInput.value.trim();
     if(!name){ toast('Enter a section name'); nameInput.focus(); return; }
-    createCustomSection(state.inspectionId, name).then(function(cs){
+    var typeEl = document.querySelector('input[name="newSectionType"]:checked');
+    var photoOnly = !!(typeEl && typeEl.value==='photos' && isAdminRole());
+    createCustomSection(state.inspectionId, name, photoOnly).then(function(cs){
       closeAddSectionModal();
       toast('Section added');
       navigate('section', {sectionSr:null, customSectionId: cs.id});
@@ -3878,24 +3950,26 @@ function questionCardHTML(sectionSr, qIdx, ref, qtext, rec){
 }
 function photoThumbHTML(p){
   var url = (p && p.__dataUrl) || '';
-  var brokenClass = url ? '' : ' thumb-broken';
+  var brokenClass = (url ? '' : ' thumb-broken') + ((p && p.defect) ? ' defect' : '');
   return '<div class="thumb'+brokenClass+'" data-photo-id="'+((p&&p.id)||'')+'"><img src="'+url+'" data-role="thumb-img" draggable="false">'+
     '<button class="move" data-role="move-photo" aria-label="Move photo">'+ICONS.move+'</button>'+
     '<button class="del" data-role="del-photo" aria-label="Remove photo">'+ICONS.x+'</button></div>';
 }
-function sectionPhotosCardHTML(extras){
+function sectionPhotosCardHTML(extras, photoOnly){
   var photosHtml = (extras.photos||[]).map(function(p){ return photoThumbHTML(p); }).join('');
   return '' +
-  '<div class="qcard extras-card" data-photo-mode="section">'+
-    '<div class="seg-label">Section photos</div>'+
-    '<p class="extras-hint">General photos for this location, not tied to one specific question below.</p>'+
+  '<div class="qcard extras-card'+(photoOnly?' photo-section-card':'')+'" data-photo-mode="section"'+(photoOnly?' data-photo-only="1"':'')+'>'+
+    '<div class="seg-label">'+(photoOnly?'Photos':'Section photos')+'</div>'+
+    (photoOnly
+      ? '<p class="extras-hint">Take or upload photos. After each one you can mark it as a <strong style="color:#8B0000;">Defect</strong> \u2014 defect photos get a dark red border here and in the report.</p>'
+      : '<p class="extras-hint">General photos for this location, not tied to one specific question below.</p>')+
     '<div class="thumb-row" data-role="thumb-row">'+photosHtml+'</div>'+
     '<div class="photo-btns">'+
       '<button class="btn btn-outline btn-sm" data-role="take-photo">'+ICONS.camera+'Take photo</button>'+
       '<button class="btn btn-outline btn-sm" data-role="upload-photo">'+ICONS.upload+'Upload photos</button>'+
       '<button class="btn btn-outline btn-sm btn-select-photos" data-role="select-photos"><span class="lbl-select">Select</span><span class="lbl-all">Select all</span></button>'+
     '</div>'+
-    '<p class="photo-limit-hint">Tip: tap Upload photos to pick several at once (up to 15). To move several photos, tap Select (or press and hold a photo), tick them, then Move or drag them together.</p>'+
+    '<p class="photo-limit-hint">Tip: tap Upload photos to pick several at once (up to '+(photoOnly?PHOTO_SECTION_MAX_PHOTOS:15)+'). To move several photos, tap Select (or press and hold a photo), tick them, then Move or drag them together.'+(photoOnly?' To mark or unmark defects later, Select them and tap Defect.':'')+'</p>'+
   '</div>';
 }
 function customFindingHTML(cf){
@@ -3979,6 +4053,14 @@ function renderSectionDetail(){
         });
         saveChain.then(function(){ return idbPutRaw('sectionExtras', extras); }).catch(function(){});
       }
+      if(isPhotoOnlySection(section)){
+        return '' +
+        '<div class="appbar">'+
+          '<button class="back" data-action="back-to-sections">'+ICONS.back+'</button>'+
+          '<div class="title-wrap"><h1>'+escapeHtml(section.name)+'</h1><p class="sub">Photo section \u00b7 '+sectionDisplayNumber(section, sections)+' of '+sections.length+'</p></div>'+
+        '</div>'+
+        '<div style="padding-top:14px;">'+sectionPhotosCardHTML(extras, true)+'</div>';
+      }
       var total = section.q.length, done=0;
       var cards = section.q.map(function(pair){
         var rec = respMap[pair[2]] || {applicable:null,answer:null,remarks:'',correctiveAction:'',preventiveAction:'',photos:[]};
@@ -4021,13 +4103,15 @@ function renderCustomSectionDetail(){
       var allPhotos = (extras.photos||[]).slice();
       (extras.customFindings||[]).forEach(function(cf){ allPhotos = allPhotos.concat(cf.photos||[]); });
       return hydratePhotoDataUrls(allPhotos).then(function(){
+        var photoOnly = isPhotoOnlySection(cs);
         return '' +
         '<div class="appbar">'+
           '<button class="back" data-action="back-to-sections">'+ICONS.back+'</button>'+
-          '<div class="title-wrap"><h1>'+escapeHtml(cs.name)+'</h1><p class="sub">Custom section</p></div>'+
+          '<div class="title-wrap"><h1>'+escapeHtml(cs.name)+'</h1><p class="sub">'+(photoOnly?'Photo section':'Custom section')+'</p></div>'+
         '</div>'+
         '<div style="padding-top:14px;">'+
-          extrasBlockHTML(extras, 'Findings', 'Log what you observed in this section. Add a photo if it helps.')+
+          (photoOnly ? sectionPhotosCardHTML(extras, true)
+                     : extrasBlockHTML(extras, 'Findings', 'Log what you observed in this section. Add a photo if it helps.'))+
           '<div class="section-pad" style="margin:0 0 24px;">'+
             '<button class="delete-link" id="btnDeleteCustomSection">Delete this section</button>'+
           '</div>'+
@@ -4183,12 +4267,13 @@ function wireQuestionCard(card){
 
 function wireSectionPhotosCard(card){
   var sectionSr = currentExtrasKey();
+  var photoOnly = card.getAttribute('data-photo-only')==='1';
   card.querySelector('[data-role="take-photo"]').addEventListener('click', function(){
-    pendingPhotoCtx = {mode:'section', inspectionId: state.inspectionId, sectionSr: sectionSr, cardEl: card};
+    pendingPhotoCtx = {mode:'section', inspectionId: state.inspectionId, sectionSr: sectionSr, cardEl: card, photoOnly: photoOnly, askDefect: photoOnly};
     document.getElementById('cameraInput').click();
   });
   card.querySelector('[data-role="upload-photo"]').addEventListener('click', function(){
-    pendingPhotoCtx = {mode:'section', inspectionId: state.inspectionId, sectionSr: sectionSr, cardEl: card};
+    pendingPhotoCtx = {mode:'section', inspectionId: state.inspectionId, sectionSr: sectionSr, cardEl: card, photoOnly: photoOnly, askDefect: photoOnly};
     document.getElementById('galleryInput').click();
   });
   wirePhotoThumbs(card);
@@ -4312,6 +4397,43 @@ function getPhotoRecord(card){
 /* Shared by the delete button and the move feature below — finds
    wherever a photo actually lives (a question's response, a section's
    general photos, or a custom finding) and removes it from there. */
+/* Sets/clears the defect flag on the given selected photos, one write per
+   source card, then updates the thumbnails in place (no re-render). */
+function setPhotosDefect(items, on){
+  var groups = [];
+  items.forEach(function(it){
+    var g = groups.filter(function(x){ return x.card===it.card; })[0];
+    if(!g){ g = {card:it.card, ids:{}, thumbs:[]}; groups.push(g); }
+    g.ids[it.photoId] = true; g.thumbs.push(it.thumb);
+  });
+  return Promise.all(groups.map(function(g){
+    return mutateCardPhotos(g.card, function(list){
+      (list||[]).forEach(function(p){ if(g.ids[p.id]){ if(on) p.defect = true; else delete p.defect; } });
+      return list;
+    }).then(function(){
+      g.thumbs.forEach(function(t){ if(t) t.classList.toggle('defect', on); });
+    });
+  }));
+}
+function mutateCardPhotos(card, fn){
+  var mode = card.getAttribute('data-photo-mode');
+  if(mode==='question'){
+    return updateResponse(state.inspectionId, state.sectionSr, parseInt(card.getAttribute('data-qidx'),10), card.getAttribute('data-ref'), function(rec){
+      rec.photos = fn(rec.photos||[]);
+    });
+  }
+  if(mode==='section'){
+    return updateExtras(state.inspectionId, currentExtrasKey(), function(extras){ extras.photos = fn(extras.photos||[]); });
+  }
+  if(mode==='custom'){
+    var customId = card.getAttribute('data-custom-id');
+    return updateExtras(state.inspectionId, currentExtrasKey(), function(extras){
+      var cf = (extras.customFindings||[]).filter(function(c){ return c.id===customId; })[0];
+      if(cf) cf.photos = fn(cf.photos||[]);
+    });
+  }
+  return Promise.resolve();
+}
 function removePhotoFromCard(card, photoId){
   return removePhotosFromCard(card, [photoId]);
 }
@@ -4348,10 +4470,11 @@ function removePhotosFromCard(card, photoIds){
 function buildPhotoMoveDestinations(customSectionsList){
   var dests = [];
   inspectionSections(currentInspDraft).forEach(function(sec){
+    var po = isPhotoOnlySection(sec);
     dests.push({
-      kind:'section', sectionSr:sec.sr,
-      mainLabel: sec.name, subLabel: 'General photos for this section',
-      search: (sec.name+' general photos').toLowerCase()
+      kind:'section', sectionSr:sec.sr, photoOnly: po,
+      mainLabel: sec.name, subLabel: po ? 'Photo section' : 'General photos for this section',
+      search: (sec.name+' general photos'+(po?' photo section':'')).toLowerCase()
     });
     sec.q.forEach(function(pair){
       var ref = pair[0], qtext = pair[1];
@@ -4363,10 +4486,11 @@ function buildPhotoMoveDestinations(customSectionsList){
     });
   });
   (customSectionsList||[]).forEach(function(cs){
+    var po = isPhotoOnlySection(cs);
     dests.push({
-      kind:'section', sectionSr:cs.id,
-      mainLabel: cs.name+' (custom)', subLabel: 'General photos for this section',
-      search: (cs.name+' general photos custom').toLowerCase()
+      kind:'section', sectionSr:cs.id, photoOnly: po,
+      mainLabel: cs.name+(po?' (photo section)':' (custom)'), subLabel: po ? 'Photo section' : 'General photos for this section',
+      search: (cs.name+' general photos custom'+(po?' photo section':'')).toLowerCase()
     });
   });
   return dests;
@@ -4432,7 +4556,7 @@ function performBatchPhotoMove(items, dest){
       list = list || [];
       toMove.forEach(function(photo){
         if(list.some(function(p){ return p.id===photo.id; })){ added[photo.id]=true; return; }
-        if(list.length >= MAX_PHOTOS_PER_TARGET) return;
+        if(list.length >= (dest.photoOnly ? PHOTO_SECTION_MAX_PHOTOS : MAX_PHOTOS_PER_TARGET)) return;
         list.push(photo); added[photo.id]=true; addedCount++;
       });
       return list;
@@ -4449,7 +4573,7 @@ function performBatchPhotoMove(items, dest){
       var skipped = toMove.length - Object.keys(added).length;
       var moved = toMove.length - skipped;
       var msg = moved ? (moved+' photo'+(moved>1?'s':'')+' moved to '+dest.mainLabel) : 'Nothing moved';
-      if(skipped) msg += ' — 15 photo limit reached, '+skipped+' left where '+(skipped>1?'they were':'it was');
+      if(skipped) msg += ' — photo limit reached, '+skipped+' left where '+(skipped>1?'they were':'it was');
       toast(msg);
       render({keepScroll:true});
     });
@@ -4475,8 +4599,11 @@ function enterPhotoSelectMode(){
   bar.innerHTML = '' +
     '<button class="icon-btn" data-role="psb-cancel" aria-label="Cancel selection">'+ICONS.x+'</button>'+
     '<div class="psb-count"><span data-role="psb-n">0 selected</span><small>Tap photos to select</small></div>'+
-    '<button class="btn btn-outline btn-sm" data-role="psb-delete">'+ICONS.trash+'Delete</button>'+
-    '<button class="btn btn-primary btn-sm" data-role="psb-move">'+ICONS.move+'Move to…</button>';
+    '<div class="psb-actions">'+
+      '<button class="btn btn-outline btn-sm" data-role="psb-defect" style="color:#8B0000;border-color:#8B0000;">Defect</button>'+
+      '<button class="btn btn-outline btn-sm" data-role="psb-delete">'+ICONS.trash+'Delete</button>'+
+      '<button class="btn btn-primary btn-sm" data-role="psb-move">'+ICONS.move+'Move to…</button>'+
+    '</div>';
   document.body.appendChild(bar);
   bar.querySelector('[data-role="psb-cancel"]').addEventListener('click', function(){ exitPhotoSelectMode(); });
   bar.querySelector('[data-role="psb-move"]').addEventListener('click', function(){
@@ -4485,6 +4612,16 @@ function enterPhotoSelectMode(){
     openPhotoDestinationPicker(items.length+' photo'+(items.length>1?'s':'')+' selected — choose where to move them', function(d){
       performBatchPhotoMove(items, d);
     });
+  });
+  bar.querySelector('[data-role="psb-defect"]').addEventListener('click', function(){
+    var items = photoSelection ? photoSelection.items.slice() : [];
+    if(!items.length) return;
+    var allDefect = items.every(function(it){ return it.thumb && it.thumb.classList.contains('defect'); });
+    var on = !allDefect;
+    setPhotosDefect(items, on).then(function(){
+      exitPhotoSelectMode();
+      toast(items.length+' photo'+(items.length>1?'s':'')+(on?' marked as defect':' unmarked as defect'));
+    }).catch(function(){ toast('Could not update the photos \u2014 please try again'); });
   });
   bar.querySelector('[data-role="psb-delete"]').addEventListener('click', function(){
     var items = photoSelection ? photoSelection.items.slice() : [];
@@ -4537,6 +4674,10 @@ function updatePhotoSelectBar(){
   bar.querySelector('[data-role="psb-n"]').textContent = n+' selected';
   bar.querySelector('small').textContent = n ? 'Tap Move, or drag a ticked photo onto a card' : 'Tap photos to select';
   bar.querySelector('[data-role="psb-move"]').disabled = !n;
+  var defBtn = bar.querySelector('[data-role="psb-defect"]');
+  defBtn.disabled = !n;
+  var allDefect = n && photoSelection.items.every(function(it){ return it.thumb && it.thumb.classList.contains('defect'); });
+  defBtn.textContent = allDefect ? 'Not defect' : 'Defect';
   bar.querySelector('[data-role="psb-delete"]').disabled = !n;
 }
 function wireSelectPhotosButton(card){
@@ -4620,6 +4761,15 @@ function wireSingleThumb(thumb, card){
     e.stopPropagation();
     openMovePhotoPicker(card, thumb.getAttribute('data-photo-id'));
   });
+  /* In select mode the WHOLE tile toggles selection — not just the <img>,
+     which is hidden for a photo that hasn't downloaded on this device
+     (e.g. taken on another device and synced), leaving nothing to click. */
+  thumb.addEventListener('click', function(e){
+    if(!photoSelection) return;
+    if(thumb.__justDragged){ thumb.__justDragged = false; return; }
+    e.stopPropagation();
+    toggleThumbSelected(thumb, card);
+  });
   delBtn.addEventListener('click', function(){
     showConfirm('Remove this photo?').then(function(ok){
       if(!ok) return;
@@ -4628,8 +4778,8 @@ function wireSingleThumb(thumb, card){
     });
   });
   img.addEventListener('click', function(){
+    if(photoSelection) return; // select mode: handled by the whole-tile click listener
     if(thumb.__justDragged){ thumb.__justDragged = false; return; }
-    if(photoSelection){ toggleThumbSelected(thumb, card); return; }
     var photoId = thumb.getAttribute('data-photo-id');
     getPhotoRecord(card).then(function(r){
       var photo = r.photos.filter(function(p){ return p.id===photoId; })[0];
@@ -4658,7 +4808,8 @@ function destinationFromCard(card){
       mainLabel: sectionName+' \u2014 '+card.getAttribute('data-ref')
     };
   }
-  return {kind:'section', sectionSr: currentExtrasKey(), mainLabel: sectionName+' \u2014 General photos'};
+  var po = card.getAttribute('data-photo-only')==='1';
+  return {kind:'section', sectionSr: currentExtrasKey(), photoOnly: po, mainLabel: sectionName+(po?'':' \u2014 General photos')};
 }
 /* Cursor/touch drag-and-drop between photo slots on the CURRENT section
    screen (question cards and the section's general-photos card — the
@@ -4817,8 +4968,11 @@ function handlePhotoFiles(e){
     return;
   }
 
-  getCurrentPhotoCount(ctx).then(function(existingCount){
-    var remaining = Math.max(0, MAX_PHOTOS_PER_TARGET - existingCount);
+  var limit = ctx.photoOnly ? PHOTO_SECTION_MAX_PHOTOS : MAX_PHOTOS_PER_TARGET;
+  var defectChoice = ctx.askDefect ? askDefectChoice(files.length) : Promise.resolve(false);
+  defectChoice.then(function(isDefect){
+  return getCurrentPhotoCount(ctx).then(function(existingCount){
+    var remaining = Math.max(0, limit - existingCount);
     var filesToAdd = files.slice(0, remaining);
     var skipped = files.length - filesToAdd.length;
 
@@ -4826,6 +4980,7 @@ function handlePhotoFiles(e){
     filesToAdd.forEach(function(file){
       chain = chain.then(function(){ return compressImage(file); }).then(function(compressed){
         var photo = {id: uid(), blob: compressed};
+        if(isDefect) photo.defect = true;
         var addPromise;
         if(ctx.mode==='question'){
           addPromise = updateResponse(ctx.inspectionId, ctx.sectionSr, ctx.qIdx, ctx.ref, function(rec){
@@ -4853,6 +5008,7 @@ function handlePhotoFiles(e){
                 row.insertAdjacentHTML('beforeend', photoThumbHTML(photo));
                 var newThumb = row.querySelector('[data-photo-id="'+photo.id+'"]');
                 if(newThumb){ wireSingleThumb(newThumb, ctx.cardEl); wireThumbDrag(newThumb, ctx.cardEl); }
+                refreshSelectButtonVisibility(ctx.cardEl);
               }
             }
           });
@@ -4860,16 +5016,46 @@ function handlePhotoFiles(e){
       });
     });
     chain.then(function(){
+      var what = (filesToAdd.length>1?'Photos added':'Photo added') + (isDefect ? ' as defect' : '');
       if(skipped>0){
         toast(filesToAdd.length
-          ? (filesToAdd.length>1?'Photos added':'Photo added')+' — 15 photo limit reached, '+skipped+' not added'
-          : 'Photo limit reached — max 15 photos per item');
+          ? what+' — '+limit+' photo limit reached, '+skipped+' not added'
+          : 'Photo limit reached — max '+limit+' photos here');
       } else {
-        toast(filesToAdd.length>1 ? 'Photos added' : 'Photo added');
+        toast(what);
       }
     });
   });
+  });
 }
+/* Asked right after taking/choosing photos in a photo section. Tapping
+   outside the panel counts as "Normal" so a stray tap never loses photos. */
+function askDefectChoice(count){
+  return new Promise(function(resolve){
+    var backdrop = document.createElement('div');
+    backdrop.className = 'sheet-backdrop';
+    var panel = document.createElement('div');
+    panel.className = 'form-sheet defect-choice';
+    var many = count>1;
+    panel.innerHTML = '' +
+      '<h3>'+(many ? 'Mark these '+count+' photos as defect?' : 'Mark this photo as defect?')+'</h3>'+
+      '<p class="confirm-message" style="margin-top:4px;">Defect photos get a dark red border in the app and in the report. You can change this later with Select.</p>'+
+      '<div class="form-actions">'+
+        '<button class="btn btn-outline" data-choice="normal">Normal</button>'+
+        '<button class="btn btn-defect" data-choice="defect">Defect</button>'+
+      '</div>';
+    document.body.appendChild(backdrop);
+    document.body.appendChild(panel);
+    var done = false;
+    function finish(v){ if(done) return; done = true; backdrop.remove(); panel.remove(); resolve(v); }
+    backdrop.addEventListener('click', function(){ finish(false); });
+    panel.querySelector('[data-choice="normal"]').addEventListener('click', function(){ finish(false); });
+    panel.querySelector('[data-choice="defect"]').addEventListener('click', function(){ finish(true); });
+  });
+}
+/* The Select button is hidden by CSS while a card has no photos; after
+   live-adding thumbnails, nothing else needs doing (CSS re-evaluates). */
+function refreshSelectButtonVisibility(card){ /* CSS-driven; kept as a hook */ }
 
 /* Maximum photos allowed per question, section, or custom finding. */
 var MAX_PHOTOS_PER_TARGET = 15;
@@ -5200,9 +5386,21 @@ function pdfAddPhotoRow(doc, photos, x, y, maxWidth, thumbH){
       try{ doc.addImage(photos[i].url, 'JPEG', curX, y, fit.w, fit.h); }catch(e){
         logDiagnostic('pdf_addImageThrew', {errName: e && e.name, errMessage: e && e.message, urlPrefix: (photos[i].url||'').slice(0,40), w: fit.w, h: fit.h});
       }
-      doc.setDrawColor(PDF_COLOR.border[0],PDF_COLOR.border[1],PDF_COLOR.border[2]);
-      doc.setLineWidth(0.35);
-      doc.rect(curX, y, fit.w, fit.h);
+      if(photos[i].defect){
+        // Dark red frame + "DEFECT" tag for photos marked as defects.
+        doc.setDrawColor(139,0,0);
+        doc.setLineWidth(1.4);
+        doc.rect(curX, y, fit.w, fit.h);
+        doc.setFillColor(139,0,0);
+        doc.rect(curX, y+fit.h-4.2, Math.min(16, fit.w), 4.2, 'F');
+        doc.setFont('helvetica','bold'); doc.setFontSize(6.5); doc.setTextColor(255,255,255);
+        doc.text('DEFECT', curX+1.3, y+fit.h-1.2);
+        doc.setTextColor(PDF_COLOR.ink[0],PDF_COLOR.ink[1],PDF_COLOR.ink[2]);
+      } else {
+        doc.setDrawColor(PDF_COLOR.border[0],PDF_COLOR.border[1],PDF_COLOR.border[2]);
+        doc.setLineWidth(0.35);
+        doc.rect(curX, y, fit.w, fit.h);
+      }
       curX += fit.w + gap;
       rowH = Math.max(rowH, fit.h);
     }
@@ -5459,7 +5657,7 @@ function buildInspectionPDF(insp, responses, extrasList, customSectionsList, ves
         });
       });
       photoUrlCache[p.id] = pr;
-      return pr;
+      return pr.then(function(u){ return u ? Object.assign({}, u, {defect: !!p.defect}) : u; });
     })).then(function(urls){ return urls.filter(Boolean); });
   }
 
@@ -5619,12 +5817,17 @@ function buildInspectionPDF(insp, responses, extrasList, customSectionsList, ves
         finishCard();
       });
     }
-    function renderGeneralPhotos(extras){
+    function renderGeneralPhotos(extras, photoOnly){
       if(!extras || !extras.photos || !extras.photos.length) return;
       chain = chain.then(function(){
         y = pdfEnsureSpace(doc, y, 55); // label + first photo row kept together
         doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(PDF_COLOR.teal[0],PDF_COLOR.teal[1],PDF_COLOR.teal[2]);
-        doc.text('General section photos', PDF_MARGIN, y);
+        var nDef = extras.photos.filter(function(p){ return p && p.defect; }).length;
+        doc.text(photoOnly ? 'Photos ('+extras.photos.length+')' : 'General section photos', PDF_MARGIN, y);
+        if(nDef){
+          doc.setTextColor(139,0,0);
+          doc.text(nDef+' marked as defect (red frame)', PDF_MARGIN+PDF_CONTENT_W, y, {align:'right'});
+        }
         y += 6;
         return photoDataUrls(extras.photos).then(function(urls){
           return pdfAddPhotoRow(doc, urls, PDF_MARGIN, y, PDF_CONTENT_W, 45).then(function(newY){ y = newY + 6; });
@@ -5645,7 +5848,7 @@ function buildInspectionPDF(insp, responses, extrasList, customSectionsList, ves
       chain = chain.then(function(){
         y = pdfSectionBand(doc, String(sectionDisplayNumber(section, sections)).padStart(2,'0')+'.  '+section.name, y);
       });
-      renderGeneralPhotos(extras);
+      renderGeneralPhotos(extras, isPhotoOnlySection(section));
       section.q.forEach(function(pair){
         var rec = respMap[section.sr+'_'+pair[2]];
         if(rec) renderQuestionBlock(pair[0], pair[1], rec);
@@ -5657,9 +5860,9 @@ function buildInspectionPDF(insp, responses, extrasList, customSectionsList, ves
       var hasAny = extras && ((extras.photos&&extras.photos.length) || (extras.customFindings&&extras.customFindings.length));
       if(!hasAny) return;
       chain = chain.then(function(){
-        y = pdfSectionBand(doc, cs.name+'  (custom section)', y);
+        y = pdfSectionBand(doc, cs.name+(isPhotoOnlySection(cs)?'  (photo section)':'  (custom section)'), y);
       });
-      renderGeneralPhotos(extras);
+      renderGeneralPhotos(extras, isPhotoOnlySection(cs));
       renderCustomFindings(extras);
     });
 
@@ -5846,7 +6049,7 @@ function buildPrintableReport(insp, responses, extrasList, customSectionsList, v
     (photos||[]).forEach(function(p){
       var idx = photoJobs.length;
       photoJobs.push({idx:idx, blob:p.blob, assetId:p.assetId});
-      out += '<img data-photo-slot="'+idx+'">';
+      out += '<img data-photo-slot="'+idx+'"'+(p && p.defect ? ' class="defect"' : '')+'>';
     });
     return out;
   }
@@ -5862,6 +6065,7 @@ function buildPrintableReport(insp, responses, extrasList, customSectionsList, v
       '<div class="pr-q">'+
         '<span class="pref">General</span> Section photos '+
         '<div class="pr-photos">'+pushPhotoImgs(extras.photos)+'</div>'+
+        (extras.photos.some(function(p){ return p && p.defect; }) ? '<div class="pr-defect-legend">Red frame = defect</div>' : '')+
       '</div>';
   }
   function customFindingsRowsHtml(extras){
@@ -6230,7 +6434,7 @@ function exportInspectionCSV(inspId){
       var displayNum = sectionDisplayNumber(section, sections);
       var extras = extrasMap[section.sr];
       if(extras && extras.photos && extras.photos.length){
-        rows.push([displayNum, section.name, 'General', 'General section photos', '', '', '', '', '', extras.photos.length]);
+        rows.push([displayNum, section.name, 'General', (isPhotoOnlySection(section)?'Photo section':'General section photos')+defectNote(extras.photos), '', '', '', '', '', extras.photos.length]);
       }
       section.q.forEach(function(pair){
         var rec = respMap[section.sr+'_'+pair[2]];
@@ -6248,7 +6452,7 @@ function exportInspectionCSV(inspId){
     customSectionsList.forEach(function(cs){
       var extras = extrasMap[cs.id];
       if(extras && extras.photos && extras.photos.length){
-        rows.push(['Custom', cs.name, 'General', 'General section photos', '', '', '', '', '', extras.photos.length]);
+        rows.push(['Custom', cs.name, 'General', (isPhotoOnlySection(cs)?'Photo section':'General section photos')+defectNote(extras.photos), '', '', '', '', '', extras.photos.length]);
       }
       if(extras && extras.customFindings && extras.customFindings.length){
         extras.customFindings.forEach(function(cf){
