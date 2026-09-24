@@ -3330,11 +3330,34 @@ function renderManageChecklist(){
       '<div class="title-wrap"><h1>Manage checklist</h1></div>'+
     '</div>'+
     '<div class="section-pad fab-new">'+
-      '<button class="btn btn-primary btn-block" id="btnAddChecklistSection">'+ICONS.plus+'Add section</button>'+
+      '<div style="display:flex;gap:10px;">'+
+        '<button class="btn btn-primary" id="btnAddChecklistSection" style="flex:1;">'+ICONS.plus+'Add section</button>'+
+        '<button class="btn btn-outline" id="btnAddPhotoSection" style="flex:1;">'+ICONS.camera+'Add photo section</button>'+
+      '</div>'+
     '</div>'+
     '<div id="manageSectionsList">'+rows+'</div>'+
     '<p class="footer-note">Drag '+ICONS.grip+' to reorder. Changes here only apply to inspections started after the change — any inspection already created (pending, in progress or completed) keeps showing the checklist exactly as it was when it was started.</p>'
   );
+}
+/* Menu item that turns a checklist section into a photo section (or back).
+   A section that still has questions can't become a photo section — its
+   questions would silently vanish from new inspections — so the admin is
+   told to remove them first. */
+function photoSectionToggleItem(section){
+  if(isPhotoOnlySection(section)){
+    return {label:'Change to checklist section', icon:ICONS.clipboard, onClick:function(){
+      delete section.photoOnly;
+      persistSectionsAndRerender().then(function(){ toast('Now a checklist section \u2014 add questions to it'); });
+    }};
+  }
+  return {label:'Make photo section (photos only)', icon:ICONS.camera, onClick:function(){
+    if(section.q.length){
+      toast('Remove its '+section.q.length+' question'+(section.q.length>1?'s':'')+' first \u2014 a photo section has no questions');
+      return;
+    }
+    section.photoOnly = true;
+    persistSectionsAndRerender().then(function(){ toast('"'+section.name+'" is now a photo section'); });
+  }};
 }
 function persistSectionsAndRerender(){
   return saveSectionsTemplate().then(function(){ render(); });
@@ -3343,8 +3366,7 @@ function wireManageChecklist(){
   // Back button uses data-action="home", already wired globally in wireCurrentView().
 
   var addBtn = document.getElementById('btnAddChecklistSection');
-  if(addBtn) addBtn.addEventListener('click', function(){
-    function addSection(photoOnly){
+  function addSection(photoOnly){
       showPrompt(photoOnly ? 'New photo section name' : 'New section name', '', photoOnly ? 'e.g. General photos / Defect photos' : 'e.g. Forecastle Store').then(function(name){
         if(!name) return;
         var sr = sectionsNextSr++;
@@ -3353,12 +3375,10 @@ function wireManageChecklist(){
         SECTIONS.push(sec);
         persistSectionsAndRerender().then(function(){ toast(photoOnly ? 'Photo section added' : 'Section added'); });
       });
-    }
-    openSheet([
-      {label:'Checklist section (with questions)', icon:ICONS.clipboard, onClick:function(){ addSection(false); }},
-      {label:'Photo section (photos only)', icon:ICONS.camera, onClick:function(){ addSection(true); }}
-    ]);
-  });
+  }
+  if(addBtn) addBtn.addEventListener('click', function(){ addSection(false); });
+  var addPhotoBtn = document.getElementById('btnAddPhotoSection');
+  if(addPhotoBtn) addPhotoBtn.addEventListener('click', function(){ addSection(true); });
 
   document.querySelectorAll('#manageSectionsList [data-reorder-id]').forEach(function(row){
     var sr = parseInt(row.getAttribute('data-reorder-id'),10);
@@ -3379,6 +3399,7 @@ function wireManageChecklist(){
             persistSectionsAndRerender();
           });
         }},
+        photoSectionToggleItem(section),
         {label:'Delete section', icon:ICONS.trash, danger:true, onClick:function(){
           showConfirm('Delete "'+section.name+'" from the checklist? Inspections already created keep this section exactly as it is now — this only removes it from inspections started from now on.').then(function(ok){
             if(!ok) return;
@@ -3423,6 +3444,7 @@ function renderManageChecklistSection(){
     '</div>'+
     '<div class="section-pad" style="display:flex;gap:10px;">'+
       '<button class="btn btn-outline" id="btnRenameChecklistSection" style="flex:1;">'+ICONS.edit+'Rename section</button>'+
+      '<button class="btn btn-outline" id="btnTogglePhotoSection" style="flex:1;">'+ICONS.camera+(isPhotoOnlySection(section)?'Make checklist section':'Make photo section')+'</button>'+
     '</div>'+
     (isPhotoOnlySection(section)
       ? '<div class="empty-state" style="margin:6px 16px 16px;"><p><strong>Photo section.</strong><br>This section holds photos only \u2014 inspectors will see Take photo / Upload photos here, with the option to mark each photo as a defect.</p></div>'
@@ -3452,6 +3474,9 @@ function wireManageChecklistSection(){
       persistSectionsAndRerender();
     });
   });
+
+  var togglePhotoBtn = document.getElementById('btnTogglePhotoSection');
+  if(togglePhotoBtn) togglePhotoBtn.addEventListener('click', function(){ photoSectionToggleItem(section).onClick(); });
 
   var addQBtn = document.getElementById('btnAddChecklistQuestion');
   if(addQBtn) addQBtn.addEventListener('click', function(){
