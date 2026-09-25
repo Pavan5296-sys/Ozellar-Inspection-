@@ -6861,6 +6861,35 @@ function sbPushDirty(){
     renderSyncStatus();
   });
 }
+/* SHARED COMPANY DATA — every login writes its own rows (user_id =
+   itself), but everyone reads EVERY company row, so vessels, checklist
+   and inspections added by one person reach everyone else. When several
+   people have a row for the same record (store+key), the newest
+   updated_at wins. Reads are paged (the API returns at most 1000 rows per
+   request) and only the index is fetched first; full data (which carries
+   photos) is fetched only for records that are actually newer. */
+function sbFetchCloudIndex(){
+  var all = [];
+  function page(from){
+    return sb.from('records').select('user_id,store,key,updated_at,deleted')
+      .order('updated_at', {ascending:true}).range(from, from+999).then(function(res){
+        if(res.error) throw res.error;
+        var rows = res.data || [];
+        all = all.concat(rows);
+        if(rows.length===1000) return page(from+1000);
+        return all;
+      });
+  }
+  return page(0).then(function(rows){
+    var idx = {};
+    rows.forEach(function(row){
+      var k = row.store+'|'+row.key;
+      var cur = idx[k];
+      if(!cur || (row.updated_at||0) > (cur.updated_at||0)) idx[k] = row;
+    });
+    return idx;
+  });
+}
 /* Pulls every row for this login and writes anything newer than the
    local copy straight in with idbPutRaw — not idbPut — so pulling a
    change down doesn't turn around and re-queue it as a local edit to
@@ -6869,19 +6898,23 @@ function sbPullAll(){
   if(!sb || !sbUser) return Promise.resolve();
   sbSyncState.status = 'syncing';
   renderSyncStatus();
-  return sb.from('records').select('*').eq('user_id', sbUser.id).then(function(res){
-    if(res.error || !res.data){ sbSyncState.status='error'; sbSyncState.error=res.error; renderSyncStatus(); return; }
+  return sbFetchCloudIndex().then(function(idx){
     var chain = Promise.resolve();
-    res.data.forEach(function(row){
+    Object.keys(idx).forEach(function(k){
+      var row = idx[k];
+      if(SB_STORES.indexOf(row.store)===-1) return;
       chain = chain.then(function(){
         return idbGet(row.store, row.key).catch(function(){ return null; }).then(function(local){
           if(row.deleted){
-            if(local) return idbDelete(row.store, row.key).catch(function(){});
+            if(local && (local.updatedAt||0) <= (row.updated_at||0)) return idbDelete(row.store, row.key).catch(function(){});
             return;
           }
           if(local && (local.updatedAt||0) >= (row.updated_at||0)) return; // local is already current
-          var unpacked = sbUnpackFromSync(row.data);
-          return idbPutRaw(row.store, unpacked).catch(function(){});
+          return sb.from('records').select('data').eq('user_id', row.user_id).eq('store', row.store).eq('key', row.key).maybeSingle().then(function(r){
+            if(r.error || !r.data || !r.data.data) return;
+            var unpacked = sbUnpackFromSync(r.data.data);
+            return idbPutRaw(row.store, unpacked).catch(function(){});
+          }).catch(function(){});
         });
       });
     });
@@ -6920,11 +6953,7 @@ function sbPullAll(){
    overrides it if the local edit is genuinely newer. */
 function sbPushLocalBacklog(){
   if(!sb || !sbUser) return Promise.resolve();
-  return sb.from('records').select('store,key,updated_at,deleted').eq('user_id', sbUser.id).then(function(res){
-    var cloudIndex = {};
-    if(res.data){
-      res.data.forEach(function(row){ cloudIndex[row.store+'|'+row.key] = row; });
-    }
+  return sbFetchCloudIndex().then(function(cloudIndex){
     var chain = Promise.resolve();
     SB_STORES.forEach(function(storeName){
       chain = chain.then(function(){
