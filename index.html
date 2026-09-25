@@ -2969,7 +2969,7 @@ function wireAssignUser(){
    Whenever the app comes back to the foreground (and every 10 minutes),
    compare this copy's version with the one online; if they differ, show a
    bar to tap for the new version. */
-var APP_VERSION = '2026-09-25-2115';
+var APP_VERSION = '2026-09-25-2145';
 var appUpdateShown = false;
 function checkForAppUpdate(){
   if(appUpdateShown || typeof fetch!=='function' || !navigator.onLine) return;
@@ -6745,13 +6745,15 @@ function buildInspectionPDF(insp, responses, extrasList, customSectionsList, ves
       });
     }
 
-    sections.forEach(function(section){
+    /* Photo sections are an internal photo store, not part of the report. */
+    var reportSections = sections.filter(function(sec){ return !isPhotoOnlySection(sec); });
+    reportSections.forEach(function(section){
       var extras = extrasMap[section.sr];
       var hasAny = (extras && ((extras.photos&&extras.photos.length) || (extras.customFindings&&extras.customFindings.length)));
       section.q.forEach(function(pair){ if(respMap[section.sr+'_'+pair[2]]) hasAny = true; });
       if(!hasAny) return;
       chain = chain.then(function(){
-        y = pdfSectionBand(doc, String(sectionDisplayNumber(section, sections)).padStart(2,'0')+'.  '+section.name, y);
+        y = pdfSectionBand(doc, String(sectionDisplayNumber(section, reportSections)).padStart(2,'0')+'.  '+section.name, y);
       });
       renderGeneralPhotos(extras, isPhotoOnlySection(section));
       section.q.forEach(function(pair){
@@ -6761,6 +6763,7 @@ function buildInspectionPDF(insp, responses, extrasList, customSectionsList, ves
       renderCustomFindings(extras);
     });
     (customSectionsList||[]).forEach(function(cs){
+      if(isPhotoOnlySection(cs)) return;
       var extras = extrasMap[cs.id];
       var hasAny = extras && ((extras.photos&&extras.photos.length) || (extras.customFindings&&extras.customFindings.length));
       if(!hasAny) return;
@@ -6825,16 +6828,6 @@ function buildInspectionPDF(insp, responses, extrasList, customSectionsList, ves
       doc.addPage(); y = PDF_MARGIN;
       y = pdfHeading(doc, 'Conclusion', y);
       y = pdfBodyText(doc, insp.conclusion || 'No conclusion entered.', PDF_MARGIN, y, PDF_CONTENT_W, 11);
-      var apprLines = approvalHistoryLines(insp);
-      if(apprLines.length){
-        y = pdfEnsureSpace(doc, y+6, 30);
-        y = pdfHeading(doc, 'Approval record', y);
-        y = pdfBodyText(doc, 'Status: '+inspStatusLabel(insp), PDF_MARGIN, y, PDF_CONTENT_W, 11);
-        apprLines.forEach(function(line){
-          y = pdfEnsureSpace(doc, y+2, 12);
-          y = pdfBodyText(doc, '• '+line, PDF_MARGIN, y, PDF_CONTENT_W, 10);
-        });
-      }
     });
 
     return chain.then(function(){
@@ -7049,7 +7042,8 @@ function buildPrintableReport(insp, responses, extrasList, customSectionsList, v
 
   /* ---- Page 4+: inspection done report (flat, no zone grouping) ---- */
   var sectionsHtml = '';
-  sections.forEach(function(section){
+  var reportSections = sections.filter(function(sec){ return !isPhotoOnlySection(sec); });
+  reportSections.forEach(function(section){
     var rowsHtml = '';
     var anyRow = false;
     var extras = extrasMap[section.sr];
@@ -7082,10 +7076,11 @@ function buildPrintableReport(insp, responses, extrasList, customSectionsList, v
     if(cfRows){ anyRow = true; rowsHtml += cfRows; }
 
     if(anyRow){
-      sectionsHtml += '<div class="pr-sec-h">'+escapeHtml(String(sectionDisplayNumber(section, sections)).padStart(2,'0'))+'. '+escapeHtml(section.name)+'</div>'+rowsHtml;
+      sectionsHtml += '<div class="pr-sec-h">'+escapeHtml(String(sectionDisplayNumber(section, reportSections)).padStart(2,'0'))+'. '+escapeHtml(section.name)+'</div>'+rowsHtml;
     }
   });
   (customSectionsList||[]).forEach(function(cs){
+    if(isPhotoOnlySection(cs)) return;
     var extras = extrasMap[cs.id];
     var rowsHtml = generalPhotosRowHtml(extras) + customFindingsRowsHtml(extras);
     var anyRow = !!(extras && ((extras.photos && extras.photos.length) || (extras.customFindings && extras.customFindings.length)));
@@ -7124,8 +7119,6 @@ function buildPrintableReport(insp, responses, extrasList, customSectionsList, v
     '<div class="pr-page pr-last">'+
       '<h2 class="pr-page-title">Conclusion</h2>'+
       '<div class="pr-freetext">'+(insp.conclusion ? escapeHtml(insp.conclusion) : '<span class="pr-empty-note">No conclusion entered.</span>')+'</div>'+
-      (approvalHistoryLines(insp).length ? '<h2 class="pr-page-title" style="margin-top:24px;">Approval record</h2>'+
-        '<div class="pr-freetext"><strong>Status:</strong> '+escapeHtml(inspStatusLabel(insp))+'<br>'+approvalHistoryLines(insp).map(function(l){ return '• '+escapeHtml(l); }).join('<br>')+'</div>' : '')+
     '</div>';
 
   var html = coverHtml + summaryHtml + vesselDetailHtml + inspectionReportHtml + observationListHtml + conclusionHtml;
@@ -7347,8 +7340,9 @@ function exportInspectionCSV(inspId){
     extrasList.forEach(function(ex){ extrasMap[ex.sectionSr] = ex; });
 
     var rows = [['Sr','Section','Ref','Question','Applicable','Finding','Remarks','Corrective Action','Preventive Action','Photos']];
-    sections.forEach(function(section){
-      var displayNum = sectionDisplayNumber(section, sections);
+    var csvSections = sections.filter(function(sec){ return !isPhotoOnlySection(sec); });
+    csvSections.forEach(function(section){
+      var displayNum = sectionDisplayNumber(section, csvSections);
       var extras = extrasMap[section.sr];
       if(extras && extras.photos && extras.photos.length){
         rows.push([displayNum, section.name, 'General', (isPhotoOnlySection(section)?'Photo section':'General section photos')+defectNote(extras.photos), '', '', '', '', '', extras.photos.length]);
@@ -7367,6 +7361,7 @@ function exportInspectionCSV(inspId){
       }
     });
     customSectionsList.forEach(function(cs){
+      if(isPhotoOnlySection(cs)) return;
       var extras = extrasMap[cs.id];
       if(extras && extras.photos && extras.photos.length){
         rows.push(['Custom', cs.name, 'General', (isPhotoOnlySection(cs)?'Photo section':'General section photos')+defectNote(extras.photos), '', '', '', '', '', extras.photos.length]);
