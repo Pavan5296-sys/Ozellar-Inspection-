@@ -3150,7 +3150,21 @@ function renderForm(){
   return Promise.all([loadInsp, getVessels()]).then(function(results){
     var insp = results[0], vessels = results[1];
     if(isEdit && insp && !guardVesselAccess(insp.vesselName)) return '<div class="loading">Redirecting\u2026</div>';
-    if(isTechManagerRole() || isVesselManagerRole()) vessels = vessels.filter(function(v){ return vesselAllowedForRole(v.name); });
+    if(isTechManagerRole() || isVesselManagerRole()){
+      vessels = vessels.filter(function(v){ return vesselAllowedForRole(v.name); });
+      /* Always offer every vessel the admin assigned to this person, even if
+         that vessel's full record hasn't synced to this device yet — the
+         assignment itself is enough to start an inspection on it. Its IMO /
+         type can be typed in, and its particulars show up once synced. */
+      var haveNames = {};
+      vessels.forEach(function(v){ haveNames[(v.name||'').trim().toLowerCase()] = true; });
+      (effectiveRole().fleet||[]).forEach(function(fname, i){
+        var n = (fname||'').trim();
+        if(!n || haveNames[n.toLowerCase()]) return;
+        haveNames[n.toLowerCase()] = true;
+        vessels.push({id:'__assigned__'+i, name:n});
+      });
+    }
     formVesselsCache = vessels;
     var v = insp || {vesselName:'',imo:'',vesselType:'',port:'',date:todayISO(),inspector:'',company:'',vesselPhoto:null,
       inspectionType:'port', completionDate:'', sailFromDate:'', sailFromPort:'', sailToDate:'', sailToPort:'', remoteFromDate:'', remoteToDate:''};
