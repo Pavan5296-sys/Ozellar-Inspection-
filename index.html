@@ -733,6 +733,34 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .boot-splash svg{width:44px;height:44px;color:var(--accent);}
 .boot-splash .bw{font-size:20px;font-weight:700;color:var(--ink);}
 
+.status-chip.appr-wait{background:#E6F0FA;color:#1F5C99;}
+.status-chip.appr-returned{background:var(--bad-tint,#FCEEE9);color:var(--bad,#C1432A);}
+.appr-panel{margin:6px 16px 16px;display:flex;flex-direction:column;gap:10px;}
+.appr-status{border-radius:10px;padding:12px 14px;font-size:14px;line-height:1.45;border:1px solid var(--border);}
+.appr-wait-box{background:#E6F0FA;border-color:#9DBFE3;color:#1F5C99;}
+.appr-ok-box{background:var(--ok-tint);border-color:var(--ok);color:var(--ok);}
+.appr-ret-box{background:#FCEEE9;border-color:#E7A48F;color:#8B2B14;}
+.appr-note{font-size:12px;opacity:.85;}
+.appr-actions{display:flex;flex-direction:column;gap:8px;}
+.appr-actions .btn{width:100%;margin-left:0;}
+.appr-history{border:1px solid var(--border);border-radius:10px;background:var(--surface);}
+.appr-h-row{padding:10px 12px;border-top:1px solid var(--border);font-size:13px;}
+.appr-h-row:first-child{border-top:0;}
+.appr-h-meta{color:var(--faint);font-size:12px;margin-top:2px;}
+.appr-h-comment{font-style:italic;margin-top:4px;}
+.appr-notice{border:1px solid #9DBFE3;background:#F2F7FC;border-radius:12px;overflow:hidden;margin-bottom:10px;}
+.appr-notice-ret{border-color:#E7A48F;background:#FDF5F2;}
+.appr-notice-title{font-weight:700;font-size:14px;padding:10px 12px;display:flex;align-items:center;gap:8px;color:var(--ink);}
+.appr-badge{background:#1F5C99;color:#fff;border-radius:20px;min-width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;padding:0 6px;}
+.appr-badge-ret{background:#C1432A;}
+.appr-notice-row{display:flex;width:100%;align-items:center;justify-content:space-between;gap:10px;text-align:left;padding:10px 12px;border:0;border-top:1px solid rgba(0,0,0,.06);background:transparent;font-size:14px;color:var(--ink);}
+.appr-notice-row small{color:var(--faint);font-size:12px;}
+.appr-notice-row svg{width:16px;height:16px;flex:none;}
+body.insp-locked #app .qcard, body.insp-locked #app .extras-card, body.insp-locked #app #customFindingsList,
+body.insp-locked #app #btnAddCustomFinding, body.insp-locked #app textarea, body.insp-locked #app .photo-btns,
+body.insp-locked #app #btnAddSection, body.insp-locked #app #btnSaveForm{pointer-events:none;}
+body.insp-locked #app textarea{opacity:.8;}
+#app[data-lock-msg]::before{content:attr(data-lock-msg);display:block;background:#E6F0FA;color:#1F5C99;font-size:13px;font-weight:600;text-align:center;padding:8px 12px;}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
@@ -1820,6 +1848,7 @@ function render(opts){
   if(typeof exitPhotoSelectMode==='function') exitPhotoSelectMode();
   var app = document.getElementById('app');
   app.innerHTML = '<div class="loading">Loading…</div>';
+  if(typeof refreshInspectionLock==='function') refreshInspectionLock();
   revokeAllURLs();
   var task;
   if(sbAuthGateActive()) task = Promise.resolve(renderAuthGateHTML());
@@ -2443,9 +2472,7 @@ function renderVesselHistory(){
       rowsHtml = '<div class="empty-state">'+ICONS.clipboard+'<p>No inspections recorded for this vessel yet.</p></div>';
     } else {
       rowsHtml = matches.map(function(insp){
-        var statusChip = insp.status==='completed'
-          ? '<span class="status-chip complete">Completed</span>'
-          : '<span class="status-chip progress">In progress</span>';
+        var statusChip = approvalChipHTML(insp);
         var metaBits = [inspectionTypeLabel(insp.inspectionType), insp.port||'-', fmtDate(insp.date)];
         if(insp.completionDate) metaBits.push('Completed '+fmtDate(insp.completionDate));
         return '' +
@@ -2847,6 +2874,401 @@ function wireAssignUser(){
   });
 }
 
+/* =====================================================================
+   APPROVALS — two-level sign-off for a finished inspection.
+     Vessel Manager submits -> picks a Tech Manager (one who has that
+       vessel) -> Tech Manager approves and picks a Director -> Director
+       gives final approval.
+     Tech Manager or Admin submits -> picks a Director -> Director gives
+       final approval.
+     Any reviewer can instead Return it (with a comment) to the submitter.
+     Admin can act at any stage.
+   Everything lives on the inspection record itself (insp.approval), so it
+   syncs through the same shared records as every other inspection edit.
+   Emails go out through EmailJS when an Admin has set it up (see
+   "Email notifications" in the menu); in-app notices always work.
+   ===================================================================== */
+var appUsersCache = null;
+function loadAppUsers(force){
+  if(!sb || !sbUser) return Promise.resolve([]);
+  if(appUsersCache && !force) return Promise.resolve(appUsersCache);
+  return sb.rpc('list_app_users').then(function(res){
+    if(res.error) return appUsersCache || [];
+    appUsersCache = (res.data||[]).map(function(u){
+      return {email:(u.email||'').trim().toLowerCase(), name:u.name||'', role:u.role||'', fleet:u.fleet||[]};
+    });
+    return appUsersCache;
+  }).catch(function(){ return appUsersCache || []; });
+}
+function myEmail(){ return ((sbUser && sbUser.email) || '').trim().toLowerCase(); }
+function roleLabelOf(r){
+  return r==='admin' ? 'Admin' : r==='director' ? 'Director' : r==='techManager' ? 'Tech Manager' : r==='vesselManager' ? 'Vessel Manager' : 'User';
+}
+function approvalWorkflowActive(){ return !!(sb && sbUser); }
+function approvalStage(insp){ return (insp && insp.approval) ? insp.approval.stage : null; }
+function isAwaitingApproval(insp){ var s = approvalStage(insp); return s==='tm' || s==='director'; }
+function isApproved(insp){ return approvalStage(insp)==='approved'; }
+function isReturned(insp){ return approvalStage(insp)==='returned'; }
+function canActOnApproval(insp){
+  if(!isAwaitingApproval(insp)) return false;
+  if(isAdminRole()) return true;
+  var a = insp.approval, me = myEmail();
+  if(a.stage==='tm') return isTechManagerRole() && a.tmEmail===me;
+  if(a.stage==='director') return isDirectorRole() && a.directorEmail===me;
+  return false;
+}
+function personLabel(name, email){ return name ? name+' ('+email+')' : (email||''); }
+function inspStatusLabel(insp){
+  if(!insp) return '';
+  var a = insp.approval;
+  if(a && a.stage==='tm') return 'Waiting for Tech Manager approval';
+  if(a && a.stage==='director') return 'Waiting for Director approval';
+  if(a && a.stage==='approved') return 'Approved';
+  if(a && a.stage==='returned') return 'Rejected — returned for correction';
+  return insp.status==='completed' ? 'Completed' : 'In progress';
+}
+function approvalChipHTML(insp){
+  var a = insp.approval;
+  if(a && a.stage==='tm') return '<span class="status-chip appr-wait">Waiting: Tech Manager</span>';
+  if(a && a.stage==='director') return '<span class="status-chip appr-wait">Waiting: Director</span>';
+  if(a && a.stage==='approved') return '<span class="status-chip complete">Approved</span>';
+  if(a && a.stage==='returned') return '<span class="status-chip appr-returned">Rejected</span>';
+  return insp.status==='completed' ? '<span class="status-chip complete">Completed</span>' : '<span class="status-chip progress">In progress</span>';
+}
+function tmsForVessel(users, vesselName){
+  var n = (vesselName||'').trim().toLowerCase();
+  return users.filter(function(u){
+    return u.role==='techManager' && (u.fleet||[]).some(function(f){ return (f||'').trim().toLowerCase()===n; });
+  });
+}
+function directorsOf(users){ return users.filter(function(u){ return u.role==='director'; }); }
+
+/* One bottom sheet for every approval step: optional person picker,
+   comment box, confirm. Resolves {email,name,comment} or null. */
+function approvalSheet(opts){
+  return new Promise(function(resolve){
+    var backdrop = document.createElement('div'); backdrop.className = 'sheet-backdrop';
+    var panel = document.createElement('div'); panel.className = 'form-sheet';
+    var people = opts.people || null;
+    panel.innerHTML = '' +
+      '<h3>'+escapeHtml(opts.title)+'</h3>'+
+      (opts.message ? '<p style="color:var(--faint);font-size:14px;">'+escapeHtml(opts.message)+'</p>' : '')+
+      (people ? '<div class="field"><label>'+escapeHtml(opts.pickLabel||'Send to')+'</label><select id="apprPerson">'+
+        '<option value="" selected disabled>Choose…</option>'+
+        people.map(function(p){ return '<option value="'+escapeHtml(p.email)+'">'+escapeHtml(personLabel(p.name, p.email))+'</option>'; }).join('')+
+      '</select></div>' : '')+
+      '<div class="field"><label>'+(opts.commentRequired?'Comment <span class="req">*</span>':'Comment (optional)')+'</label>'+
+        '<textarea id="apprComment" rows="3" placeholder="'+escapeHtml(opts.commentPlaceholder||'Add a note…')+'"></textarea></div>'+
+      '<div class="form-actions">'+
+        '<button class="btn btn-outline" id="apprCancel">Cancel</button>'+
+        '<button class="btn '+(opts.danger?'btn-danger':'btn-primary')+'" id="apprOk">'+escapeHtml(opts.okLabel||'Send')+'</button>'+
+      '</div>';
+    document.body.appendChild(backdrop); document.body.appendChild(panel);
+    var done = false;
+    function finish(v){ if(done) return; done = true; backdrop.remove(); panel.remove(); resolve(v); }
+    backdrop.addEventListener('click', function(){ finish(null); });
+    document.getElementById('apprCancel').addEventListener('click', function(){ finish(null); });
+    document.getElementById('apprOk').addEventListener('click', function(){
+      var sel = document.getElementById('apprPerson');
+      var comment = (document.getElementById('apprComment').value||'').trim();
+      var person = null;
+      if(people){
+        var em = sel ? sel.value : '';
+        if(!em){ toast('Choose who to send it to'); return; }
+        person = people.filter(function(p){ return p.email===em; })[0];
+      }
+      if(opts.commentRequired && !comment){ toast('Please add a comment'); return; }
+      finish({email: person?person.email:'', name: person?person.name:'', comment: comment});
+    });
+  });
+}
+
+function approvalEmailConfig(){
+  return idbGet('appConfig','emailjs').catch(function(){ return null; });
+}
+function sendApprovalEmail(toEmail, toName, subject, message){
+  if(!toEmail) return Promise.resolve(false);
+  return approvalEmailConfig().then(function(cfg){
+    if(!cfg || !cfg.serviceId || !cfg.templateId || !cfg.publicKey) return false;
+    var link = window.location.origin + window.location.pathname;
+    return fetch('https://api.emailjs.com/api/v1.0/email/send', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        service_id: cfg.serviceId, template_id: cfg.templateId, user_id: cfg.publicKey,
+        template_params: {to_email: toEmail, to_name: toName||toEmail, subject: subject, message: message, app_link: link}
+      })
+    }).then(function(r){ return r.ok; }).catch(function(){ return false; });
+  });
+}
+function notifyText(insp){
+  return (insp.vesselName||'Vessel')+' — inspection of '+fmtDate(insp.date);
+}
+
+function saveApproval(insp){
+  insp.updatedAt = Date.now();
+  return idbPut('inspections', insp).then(function(){
+    if(typeof sbPushDirty==='function') setTimeout(sbPushDirty, 50);
+    return insp;
+  });
+}
+function historyEntry(action, level, comment){
+  return {action: action, level: level||'', byEmail: myEmail(), byName: currentRole.name||'', byRole: currentRole.type, at: Date.now(), comment: comment||''};
+}
+
+function submitForApproval(insp){
+  if(!(insp.summary||'').trim() || !(insp.conclusion||'').trim()){
+    toast('Add a Summary and Conclusion before submitting');
+    return Promise.resolve(false);
+  }
+  var toTm = isVesselManagerRole();
+  return loadAppUsers(true).then(function(users){
+    var people = toTm ? tmsForVessel(users, insp.vesselName) : directorsOf(users);
+    if(!people.length){
+      toast(toTm ? 'No Tech Manager has '+(insp.vesselName||'this vessel')+' assigned — ask your admin' : 'No Director set up yet — ask your admin');
+      return false;
+    }
+    return approvalSheet({
+      title: 'Submit for approval',
+      message: toTm ? 'Choose the Tech Manager who should approve this inspection first. After that it goes to a Director for final approval.'
+                    : 'Choose the Director who should give final approval.',
+      pickLabel: toTm ? 'Tech Manager' : 'Director',
+      people: people, okLabel: 'Submit'
+    }).then(function(r){
+      if(!r) return false;
+      var prev = insp.approval || {};
+      insp.approval = {
+        stage: toTm ? 'tm' : 'director',
+        submittedBy: {email: myEmail(), name: currentRole.name||'', role: currentRole.type},
+        submittedAt: Date.now(),
+        tmEmail: toTm ? r.email : '', tmName: toTm ? r.name : '',
+        directorEmail: toTm ? '' : r.email, directorName: toTm ? '' : r.name,
+        history: (prev.history||[]).concat([historyEntry('submitted', toTm?'To Tech Manager':'To Director', r.comment)])
+      };
+      insp.status = 'pending_approval';
+      return saveApproval(insp).then(function(){
+        sendApprovalEmail(r.email, r.name, 'Approval needed: '+notifyText(insp),
+          personLabel(currentRole.name, myEmail())+' submitted the '+notifyText(insp)+' for your approval.'+(r.comment?'\n\nComment: '+r.comment:''));
+        toast('Submitted for approval');
+        return true;
+      });
+    });
+  });
+}
+
+function approveInspection(insp){
+  var a = insp.approval;
+  if(a.stage==='tm'){
+    return loadAppUsers(true).then(function(users){
+      var people = directorsOf(users);
+      if(!people.length){ toast('No Director set up yet — ask your admin'); return false; }
+      return approvalSheet({
+        title: 'Approve and send to Director',
+        message: 'Level 1 approval. Choose the Director for final approval.',
+        pickLabel: 'Director', people: people, okLabel: 'Approve'
+      }).then(function(r){
+        if(!r) return false;
+        a.history = (a.history||[]).concat([historyEntry('approved', 'Level 1 — Tech Manager', r.comment)]);
+        a.stage = 'director'; a.directorEmail = r.email; a.directorName = r.name;
+        return saveApproval(insp).then(function(){
+          sendApprovalEmail(r.email, r.name, 'Final approval needed: '+notifyText(insp),
+            'The '+notifyText(insp)+' was approved by '+personLabel(currentRole.name, myEmail())+' and needs your final approval.'+(r.comment?'\n\nComment: '+r.comment:''));
+          sendApprovalEmail(a.submittedBy && a.submittedBy.email, a.submittedBy && a.submittedBy.name, 'Level 1 approved: '+notifyText(insp),
+            'Your '+notifyText(insp)+' was approved by the Tech Manager and has gone to the Director for final approval.');
+          toast('Approved — sent to Director');
+          return true;
+        });
+      });
+    });
+  }
+  return approvalSheet({title:'Final approval', message:'Approve this inspection as final.', okLabel:'Approve'}).then(function(r){
+    if(!r) return false;
+    a.history = (a.history||[]).concat([historyEntry('approved', 'Final — Director', r.comment)]);
+    a.stage = 'approved'; a.approvedAt = Date.now();
+    insp.status = 'completed';
+    return saveApproval(insp).then(function(){
+      var msg = 'The '+notifyText(insp)+' has received final approval from '+personLabel(currentRole.name, myEmail())+'.'+(r.comment?'\n\nComment: '+r.comment:'');
+      sendApprovalEmail(a.submittedBy && a.submittedBy.email, a.submittedBy && a.submittedBy.name, 'Approved: '+notifyText(insp), msg);
+      if(a.tmEmail) sendApprovalEmail(a.tmEmail, a.tmName, 'Approved: '+notifyText(insp), msg);
+      toast('Inspection approved');
+      return true;
+    });
+  });
+}
+
+function returnInspection(insp){
+  var a = insp.approval;
+  return approvalSheet({
+    title: 'Reject report', message: 'It goes back to '+personLabel(a.submittedBy&&a.submittedBy.name, a.submittedBy&&a.submittedBy.email)+' ('+roleLabelOf(a.submittedBy&&a.submittedBy.role)+'), unlocked for correction.',
+    commentRequired: true, commentPlaceholder: 'Reason for rejection / what needs to be corrected', okLabel: 'Reject', danger: true
+  }).then(function(r){
+    if(!r) return false;
+    var level = a.stage==='tm' ? 'Level 1 — Tech Manager' : 'Final — Director';
+    a.history = (a.history||[]).concat([historyEntry('rejected', level, r.comment)]);
+    a.stage = 'returned'; a.returnComment = r.comment; a.returnedBy = personLabel(currentRole.name, myEmail());
+    insp.status = 'in_progress';
+    return saveApproval(insp).then(function(){
+      sendApprovalEmail(a.submittedBy && a.submittedBy.email, a.submittedBy && a.submittedBy.name, 'Rejected: '+notifyText(insp),
+        'Your '+notifyText(insp)+' was rejected by '+personLabel(currentRole.name, myEmail())+' and returned to you for correction.\n\nReason: '+r.comment);
+      toast('Rejected — returned to '+((a.submittedBy&&(a.submittedBy.name||a.submittedBy.email))||'submitter'));
+      return true;
+    });
+  });
+}
+
+function approvalHistoryHTML(insp){
+  var h = (insp.approval && insp.approval.history) || [];
+  if(!h.length) return '';
+  return '<div class="appr-history">'+h.map(function(e){
+    var verb = e.action==='submitted' ? 'Submitted' : e.action==='approved' ? 'Approved' : e.action==='rejected' ? 'Rejected' : 'Returned';
+    return '<div class="appr-h-row"><div><strong>'+verb+'</strong>'+(e.level?' · '+escapeHtml(e.level):'')+'</div>'+
+      '<div class="appr-h-meta">'+escapeHtml(personLabel(e.byName, e.byEmail))+' · '+escapeHtml(roleLabelOf(e.byRole))+' · '+escapeHtml(new Date(e.at).toLocaleString())+'</div>'+
+      (e.comment ? '<div class="appr-h-comment">“'+escapeHtml(e.comment)+'”</div>' : '')+'</div>';
+  }).join('')+'</div>';
+}
+function approvalHistoryLines(insp){
+  var h = (insp.approval && insp.approval.history) || [];
+  return h.map(function(e){
+    var verb = e.action==='submitted' ? 'Submitted' : e.action==='approved' ? 'Approved' : e.action==='rejected' ? 'Rejected' : 'Returned';
+    return verb+(e.level?' ('+e.level+')':'')+' by '+personLabel(e.byName, e.byEmail)+', '+roleLabelOf(e.byRole)+', '+new Date(e.at).toLocaleString()+(e.comment?' — "'+e.comment+'"':'');
+  });
+}
+
+/* Report-screen block: status, the right buttons for this person, history. */
+function approvalPanelHTML(insp){
+  if(!approvalWorkflowActive()) return null;
+  var a = insp.approval, html = '<div class="appr-panel">';
+  var stage = approvalStage(insp);
+  if(stage==='tm' || stage==='director'){
+    var who = stage==='tm' ? personLabel(a.tmName, a.tmEmail) : personLabel(a.directorName, a.directorEmail);
+    html += '<div class="appr-status appr-wait-box"><strong>'+(stage==='tm'?'Waiting for Tech Manager approval':'Waiting for Director final approval')+'</strong><br><span>'+escapeHtml(who)+'</span><br><span class="appr-note">Editing is locked until it’s approved or returned.</span></div>';
+    if(canActOnApproval(insp)){
+      html += '<div class="appr-actions"><button class="btn btn-primary" id="btnApprApprove">'+(stage==='tm'?'Approve &amp; send to Director':'Give final approval')+'</button>'+
+              '<button class="btn btn-outline" id="btnApprReturn" style="color:var(--bad,#C1432A);border-color:var(--bad,#C1432A);">Reject — return to '+escapeHtml((a.submittedBy&&(a.submittedBy.name||a.submittedBy.email))||'submitter')+'</button></div>';
+    }
+  } else if(stage==='approved' || insp.status==='completed'){
+    html += '<div class="appr-status appr-ok-box"><strong>'+(stage==='approved'?'Approved':'Completed')+'</strong></div>';
+    if(isAdminRole()) html += '<div class="appr-actions"><button class="btn btn-outline" id="btnApprReopen">Reopen inspection (Admin)</button></div>';
+  } else {
+    if(stage==='returned'){
+      html += '<div class="appr-status appr-ret-box"><strong>Rejected — returned for correction</strong><br><span>by '+escapeHtml(a.returnedBy||'')+'</span>'+
+              (a.returnComment?'<br><span class="appr-h-comment">“'+escapeHtml(a.returnComment)+'”</span>':'')+'</div>';
+    }
+    if(!isDirectorRole()){
+      html += '<div class="appr-actions"><button class="btn btn-primary" id="btnApprSubmit">'+(stage==='returned'?'Resubmit for approval':'Submit for approval')+'</button></div>';
+    }
+  }
+  html += approvalHistoryHTML(insp) + '</div>';
+  return html;
+}
+function wireApprovalPanel(){
+  function withInsp(fn){
+    return function(){
+      idbGet('inspections', state.inspectionId).then(function(insp){
+        if(!insp) return;
+        return fn(insp).then(function(changed){ if(changed) render(); });
+      });
+    };
+  }
+  var b;
+  if((b = document.getElementById('btnApprSubmit'))) b.addEventListener('click', withInsp(submitForApproval));
+  if((b = document.getElementById('btnApprApprove'))) b.addEventListener('click', withInsp(approveInspection));
+  if((b = document.getElementById('btnApprReturn'))) b.addEventListener('click', withInsp(returnInspection));
+  if((b = document.getElementById('btnApprReopen'))) b.addEventListener('click', withInsp(function(insp){
+    return showConfirm('Reopen this inspection? Its approval will be cleared (the history is kept).', 'Reopen').then(function(ok){
+      if(!ok) return false;
+      if(insp.approval){
+        insp.approval.history = (insp.approval.history||[]).concat([historyEntry('returned', 'Reopened by Admin', '')]);
+        insp.approval.stage = 'returned'; insp.approval.returnedBy = personLabel(currentRole.name, myEmail()); insp.approval.returnComment = 'Reopened by Admin';
+      }
+      insp.status = 'in_progress';
+      return saveApproval(insp).then(function(){ toast('Inspection reopened'); return true; });
+    });
+  }));
+}
+
+/* Home-screen notices: what's waiting for me, and what came back to me. */
+function approvalNoticesHTML(allInspections){
+  if(!approvalWorkflowActive()) return '';
+  var me = myEmail();
+  var waiting = allInspections.filter(canActOnApproval);
+  var returned = allInspections.filter(function(i){ return isReturned(i) && i.approval.submittedBy && i.approval.submittedBy.email===me; });
+  if(!waiting.length && !returned.length) return '';
+  function row(insp, sub){
+    return '<button class="appr-notice-row" data-appr-open="'+insp.id+'"><span><strong>'+escapeHtml(insp.vesselName||'Vessel')+'</strong> · '+fmtDate(insp.date)+'<br><small>'+escapeHtml(sub)+'</small></span>'+ICONS.chevron+'</button>';
+  }
+  var html = '<div class="section-pad" style="margin:0 0 12px;">';
+  if(waiting.length){
+    html += '<div class="appr-notice"><div class="appr-notice-title"><span class="appr-badge">'+waiting.length+'</span> Waiting for your approval</div>'+
+      waiting.map(function(i){ return row(i, i.approval.stage==='tm'?'Level 1 · from '+personLabel(i.approval.submittedBy.name, i.approval.submittedBy.email):'Final approval'); }).join('')+'</div>';
+  }
+  if(returned.length){
+    html += '<div class="appr-notice appr-notice-ret"><div class="appr-notice-title"><span class="appr-badge appr-badge-ret">'+returned.length+'</span> Rejected — returned to you for correction</div>'+
+      returned.map(function(i){ return row(i, i.approval.returnComment||''); }).join('')+'</div>';
+  }
+  return html + '</div>';
+}
+function wireApprovalNotices(){
+  document.querySelectorAll('[data-appr-open]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      navigate('report', {inspectionId: btn.getAttribute('data-appr-open')});
+    });
+  });
+}
+
+/* Editing lock while an inspection is waiting for approval. */
+function refreshInspectionLock(){
+  var views = ['sections','section','report','form'];
+  if(views.indexOf(state.view)===-1 || !state.inspectionId || (state.view==='form' && state.formMode!=='edit')){
+    document.body.classList.remove('insp-locked');
+    var a0 = document.getElementById('app'); if(a0) a0.removeAttribute('data-lock-msg');
+    return;
+  }
+  idbGet('inspections', state.inspectionId).then(function(insp){
+    var locked = !!(insp && (isAwaitingApproval(insp) || isApproved(insp)));
+    document.body.classList.toggle('insp-locked', locked);
+    var app = document.getElementById('app');
+    if(app){
+      if(locked) app.setAttribute('data-lock-msg', isApproved(insp) ? 'Approved — view only' : 'Waiting for approval — editing is locked');
+      else app.removeAttribute('data-lock-msg');
+    }
+  }).catch(function(){});
+}
+
+/* Admin: EmailJS settings for approval emails. */
+function showEmailSettingsSheet(){
+  approvalEmailConfig().then(function(cfg){
+    cfg = cfg || {};
+    var backdrop = document.createElement('div'); backdrop.className = 'sheet-backdrop';
+    var panel = document.createElement('div'); panel.className = 'form-sheet';
+    panel.innerHTML = '' +
+      '<h3>Email notifications</h3>'+
+      '<p style="color:var(--faint);font-size:14px;">Approval emails are sent through EmailJS (free). Paste the three values from your EmailJS account. Leave blank to turn emails off; in-app notices always work.</p>'+
+      '<div class="field"><label>Service ID</label><input type="text" id="ejService" autocapitalize="off" spellcheck="false" value="'+escapeHtml(cfg.serviceId||'')+'" placeholder="service_xxxxxxx"></div>'+
+      '<div class="field"><label>Template ID</label><input type="text" id="ejTemplate" autocapitalize="off" spellcheck="false" value="'+escapeHtml(cfg.templateId||'')+'" placeholder="template_xxxxxxx"></div>'+
+      '<div class="field"><label>Public key</label><input type="text" id="ejKey" autocapitalize="off" spellcheck="false" value="'+escapeHtml(cfg.publicKey||'')+'" placeholder="xxxxxxxxxxxxxxx"></div>'+
+      '<div class="form-actions">'+
+        '<button class="btn btn-outline" id="ejTest">Send test to me</button>'+
+        '<button class="btn btn-primary" id="ejSave">Save</button>'+
+      '</div>';
+    document.body.appendChild(backdrop); document.body.appendChild(panel);
+    function close(){ backdrop.remove(); panel.remove(); }
+    backdrop.addEventListener('click', close);
+    function values(){
+      return {key:'emailjs', serviceId:(document.getElementById('ejService').value||'').trim(),
+        templateId:(document.getElementById('ejTemplate').value||'').trim(),
+        publicKey:(document.getElementById('ejKey').value||'').trim(), updatedAt: Date.now()};
+    }
+    document.getElementById('ejSave').addEventListener('click', function(){
+      idbPut('appConfig', values()).then(function(){ toast('Email settings saved'); close(); });
+    });
+    document.getElementById('ejTest').addEventListener('click', function(){
+      idbPut('appConfig', values()).then(function(){
+        return sendApprovalEmail(myEmail(), currentRole.name||'', 'Ozellar test email', 'This is a test approval email from Ozellar All Right Inspection.');
+      }).then(function(ok){ toast(ok ? 'Test email sent to '+myEmail() : 'Could not send — check the three values'); });
+    });
+  });
+}
+
 function renderHome(){
   if(isUnassignedRole()){
     var signedInEmail = (sb && sbUser && sbUser.email) ? sbUser.email : '';
@@ -2881,9 +3303,7 @@ function renderHome(){
       listHtml = rows.map(function(row){
         var insp = row.insp, p = row.p;
         var pct = Math.round((p.done/p.total)*100);
-        var statusChip = insp.status==='completed'
-          ? '<span class="status-chip complete">Completed</span>'
-          : '<span class="status-chip progress">In progress</span>';
+        var statusChip = approvalChipHTML(insp);
         var metaBits = [];
         if(insp.imo) metaBits.push('IMO '+escapeHtml(insp.imo));
         if(insp.vesselType) metaBits.push(escapeHtml(insp.vesselType));
@@ -2916,6 +3336,7 @@ function renderHome(){
     '</div>'+
     syncStatusBarHTML()+
     (currentRole.type!=='admin' ? '<p class="footer-note" style="margin:0 0 10px;">Signed in as '+(isDirectorRole()?'Director':isTechManagerRole()?'Tech Manager':'Vessel Manager')+(currentRole.name?' \u00b7 '+escapeHtml(currentRole.name):'')+'</p>' : '')+
+    approvalNoticesHTML(allInspections)+
     modeToggleHTML()+
     actionRowHtml+
     fleetStatusBannerHTML(vessels, allInspections)+
@@ -2948,6 +3369,7 @@ function filterHomeInspections(query){
 function wireHome(){
   wireSyncBar();
   wireModeToggle();
+  wireApprovalNotices();
 
   var btnNew = document.getElementById('btnNewInspection');
   if(btnNew) btnNew.addEventListener('click', function(){ navigate('form', {formMode:'new', preselectVessel:null}); });
@@ -3022,6 +3444,7 @@ function wireHome(){
     if(isAdminRole() || isDirectorRole()) items.push({label:'Manage vessels', icon:ICONS.ship, onClick:function(){ navigate('vessels'); }});
     if(isAdminRole()) items.push({label:'Manage checklist', icon:ICONS.clipboard, onClick:function(){ navigate('manageChecklist'); }});
     if(isAdminRole()) items.push({label:'Manage users', icon:ICONS.users, onClick:function(){ navigate('manageUsers'); }});
+    if(isAdminRole() && sb) items.push({label:'Email notifications', icon:ICONS.mail, onClick:function(){ showEmailSettingsSheet(); }});
     if(!isDirectorRole() && importInput) items.push({label:'Import backup', icon:ICONS.upload, onClick:function(){ importInput.click(); }});
     if(isTechManagerRole() || isVesselManagerRole()){
       var myFleet = (effectiveRole().fleet||[]).filter(function(n){ return (n||'').trim(); });
@@ -5494,8 +5917,9 @@ function renderReport(){
       '<div class="section-pad"><div class="remarks-wrap" style="margin-top:0;">'+
         '<textarea id="reportConclusion" placeholder="Write a conclusion for this inspection. This must be completed before the inspection can be marked complete.">'+escapeHtml(insp.conclusion||'')+'</textarea>'+
       '</div></div>'+
+      (approvalWorkflowActive() ? '<div class="report-section-title">Approval</div>'+approvalPanelHTML(insp) : '')+
       '<div class="report-actions">'+
-        '<button class="btn btn-primary" id="btnToggleStatus">'+statusBtnLabel+'</button>'+
+        (approvalWorkflowActive() ? '' : '<button class="btn btn-primary" id="btnToggleStatus">'+statusBtnLabel+'</button>')+
         '<button class="btn btn-outline" id="btnPrintReport">'+ICONS.printer+'Preview report'+'</button>'+
         '<button class="btn btn-outline" id="btnExportJson">'+ICONS.json+'Export backup (JSON)</button>'+
         '<button class="btn btn-outline" id="btnExportCsv">'+ICONS.csv+'Export CSV</button>'+
@@ -5538,6 +5962,7 @@ function wireReport(){
   }, 500);
   if(conclusionEl) conclusionEl.addEventListener('input', function(){ debouncedConclusionSave(conclusionEl.value); });
 
+  wireApprovalPanel();
   var toggleBtn = document.getElementById('btnToggleStatus');
   if(toggleBtn) toggleBtn.addEventListener('click', function(){
     if(!currentInspDraft) return;
@@ -5935,7 +6360,7 @@ function buildInspectionParticularsRows(insp){
   }
   rows.push(['Inspector', insp.inspector||'-']);
   rows.push(['Company / rank', insp.company||'-']);
-  rows.push(['Status', insp.status==='completed'?'Completed':'In progress']);
+  rows.push(['Status', inspStatusLabel(insp)]);
   return rows;
 }
 function buildInspectionPDF(insp, responses, extrasList, customSectionsList, vessel){
@@ -6070,7 +6495,7 @@ function buildInspectionPDF(insp, responses, extrasList, customSectionsList, ves
       ['Date of inspection', fmtDate(insp.date)||'-'],
       ['Port of inspection', insp.port||'-'],
       ['Inspector', insp.inspector||'-'],
-      ['Status', insp.status==='completed'?'Completed':'In progress']
+      ['Status', inspStatusLabel(insp)]
     ];
     doc.setDrawColor(PDF_COLOR.border[0],PDF_COLOR.border[1],PDF_COLOR.border[2]); doc.setLineWidth(0.25);
     doc.roundedRect(cardX, ty, cardW, rowH*coverRows.length, 2, 2, 'D');
@@ -6255,6 +6680,16 @@ function buildInspectionPDF(insp, responses, extrasList, customSectionsList, ves
       doc.addPage(); y = PDF_MARGIN;
       y = pdfHeading(doc, 'Conclusion', y);
       y = pdfBodyText(doc, insp.conclusion || 'No conclusion entered.', PDF_MARGIN, y, PDF_CONTENT_W, 11);
+      var apprLines = approvalHistoryLines(insp);
+      if(apprLines.length){
+        y = pdfEnsureSpace(doc, y+6, 30);
+        y = pdfHeading(doc, 'Approval record', y);
+        y = pdfBodyText(doc, 'Status: '+inspStatusLabel(insp), PDF_MARGIN, y, PDF_CONTENT_W, 11);
+        apprLines.forEach(function(line){
+          y = pdfEnsureSpace(doc, y+2, 12);
+          y = pdfBodyText(doc, '• '+line, PDF_MARGIN, y, PDF_CONTENT_W, 10);
+        });
+      }
     });
 
     return chain.then(function(){
@@ -6544,6 +6979,8 @@ function buildPrintableReport(insp, responses, extrasList, customSectionsList, v
     '<div class="pr-page pr-last">'+
       '<h2 class="pr-page-title">Conclusion</h2>'+
       '<div class="pr-freetext">'+(insp.conclusion ? escapeHtml(insp.conclusion) : '<span class="pr-empty-note">No conclusion entered.</span>')+'</div>'+
+      (approvalHistoryLines(insp).length ? '<h2 class="pr-page-title" style="margin-top:24px;">Approval record</h2>'+
+        '<div class="pr-freetext"><strong>Status:</strong> '+escapeHtml(inspStatusLabel(insp))+'<br>'+approvalHistoryLines(insp).map(function(l){ return '• '+escapeHtml(l); }).join('<br>')+'</div>' : '')+
     '</div>';
 
   var html = coverHtml + summaryHtml + vesselDetailHtml + inspectionReportHtml + observationListHtml + conclusionHtml;
