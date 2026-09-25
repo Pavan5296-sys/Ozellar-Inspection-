@@ -3044,7 +3044,7 @@ function vesselSelectFieldHTML(vessels, matchedVessel, legacyName){
 
   var opts;
   if(vessels.length===0 && !hasLegacy){
-    opts = '<option value="" selected disabled>No vessels yet — add one below</option>';
+    opts = '<option value="" selected disabled>'+((isTechManagerRole()||isVesselManagerRole())?'No vessels on this device yet':'No vessels yet — add one below')+'</option>';
   } else {
     opts = '<option value=""'+(initialValue===''?' selected':'')+' disabled>Select a vessel…</option>';
     if(hasLegacy){
@@ -3061,7 +3061,10 @@ function vesselSelectFieldHTML(vessels, matchedVessel, legacyName){
     '<label>Vessel name <span class="req">*</span></label>'+
     '<select id="fVesselSelect">'+opts+'</select>'+
     '<div id="vesselPreviewCard" class="vessel-preview-card" style="'+(previewHtml?'':'display:none;')+'">'+previewHtml+'</div>'+
-    '<button type="button" class="btn-ghost" id="btnManageVesselsFromForm" style="padding:6px 0 0;">'+(vessels.length===0?'+ Add a vessel':'Manage vessel list')+'</button>'+
+    (vessels.length===0 && (isTechManagerRole() || isVesselManagerRole())
+      ? '<div class="footer-note" style="text-align:left;padding:8px 0 0;">Your assigned vessels'+((effectiveRole().fleet||[]).length?' ('+escapeHtml((effectiveRole().fleet||[]).join(', '))+')':'')+' haven’t downloaded to this device yet. Tap “Download vessels”. If they still don’t appear, ask your admin to open the app and tap Sync now.</div>'+
+        '<button type="button" class="btn btn-outline" id="btnFormSyncVessels" style="width:100%;margin:8px 0 0;">Download vessels</button>'
+      : '<button type="button" class="btn-ghost" id="btnManageVesselsFromForm" style="padding:6px 0 0;">'+(vessels.length===0?'+ Add a vessel':'Manage vessel list')+'</button>')+
   '</div>';
 }
 
@@ -3186,6 +3189,21 @@ function wireForm(){
     }
   });
 
+  var btnFormSync = document.getElementById('btnFormSyncVessels');
+  if(btnFormSync) btnFormSync.addEventListener('click', function(){
+    if(!sb || !sbUser){ toast('Not signed in — sign in first'); return; }
+    btnFormSync.disabled = true; btnFormSync.textContent = 'Downloading…';
+    sbPullAll().then(function(){
+      return getVessels();
+    }).then(function(vs){
+      var mine = (vs||[]).filter(function(v){ return vesselAllowedForRole(v.name); });
+      if(mine.length){ toast(mine.length+' vessel'+(mine.length>1?'s':'')+' ready'); render(); }
+      else {
+        btnFormSync.disabled = false; btnFormSync.textContent = 'Download vessels';
+        toast((vs||[]).length ? 'Vessels downloaded, but none match your assigned names — ask your admin to check' : 'No vessels found online yet — ask your admin to tap Sync now');
+      }
+    }).catch(function(){ btnFormSync.disabled = false; btnFormSync.textContent = 'Download vessels'; toast('Could not download — check your connection'); });
+  });
   var manageLink = document.getElementById('btnManageVesselsFromForm');
   if(manageLink) manageLink.addEventListener('click', function(){ navigate('vessels'); });
 
@@ -6928,6 +6946,7 @@ function sbPullAll(){
       sbSyncState.lastSyncedAt = Date.now();
       renderSyncStatus();
       if(['home','sections','section','report','manageChecklist','manageChecklistSection'].indexOf(state.view)>-1) render();
+      else if(state.view==='form' && !formVesselsCache.length) render();
     });
   }).catch(function(err){
     sbSyncState.status = 'error'; sbSyncState.error = err;
