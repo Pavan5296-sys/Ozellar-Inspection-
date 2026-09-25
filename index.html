@@ -2889,16 +2889,29 @@ function wireAssignUser(){
    "Email notifications" in the menu); in-app notices always work.
    ===================================================================== */
 var appUsersCache = null;
+var appUsersError = null;
 function loadAppUsers(force){
   if(!sb || !sbUser) return Promise.resolve([]);
   if(appUsersCache && !force) return Promise.resolve(appUsersCache);
+  appUsersError = null;
   return sb.rpc('list_app_users').then(function(res){
-    if(res.error) return appUsersCache || [];
+    if(res.error){ appUsersError = res.error.message || 'error'; return appUsersCache || []; }
     appUsersCache = (res.data||[]).map(function(u){
       return {email:(u.email||'').trim().toLowerCase(), name:u.name||'', role:u.role||'', fleet:u.fleet||[]};
     });
     return appUsersCache;
-  }).catch(function(){ return appUsersCache || []; });
+  }).catch(function(e){ appUsersError = (e && e.message) || 'offline'; return appUsersCache || []; });
+}
+/* Explains an empty approver list in plain words — the usual cause is the
+   one-time database step (list_app_users) not being run yet. */
+function explainNoApprovers(toTm, vesselName){
+  if(appUsersError){
+    if(/list_app_users|schema cache|does not exist|function/i.test(appUsersError))
+      return 'Approval setup isn’t installed in the database yet — the admin must run the approval SQL in Supabase';
+    return 'Could not load the approver list — check your internet connection and try again';
+  }
+  return toTm ? 'No Tech Manager has “'+(vesselName||'this vessel')+'” ticked in Manage users — ask your admin to assign it'
+              : 'No user has the Director role yet — ask your admin to add one in Manage users';
 }
 function myEmail(){ return ((sbUser && sbUser.email) || '').trim().toLowerCase(); }
 function roleLabelOf(r){
@@ -3024,7 +3037,7 @@ function submitForApproval(insp){
   return loadAppUsers(true).then(function(users){
     var people = toTm ? tmsForVessel(users, insp.vesselName) : directorsOf(users);
     if(!people.length){
-      toast(toTm ? 'No Tech Manager has '+(insp.vesselName||'this vessel')+' assigned — ask your admin' : 'No Director set up yet — ask your admin');
+      showConfirm(explainNoApprovers(toTm, insp.vesselName), 'OK');
       return false;
     }
     return approvalSheet({
@@ -3060,7 +3073,7 @@ function approveInspection(insp){
   if(a.stage==='tm'){
     return loadAppUsers(true).then(function(users){
       var people = directorsOf(users);
-      if(!people.length){ toast('No Director set up yet — ask your admin'); return false; }
+      if(!people.length){ showConfirm(explainNoApprovers(false), 'OK'); return false; }
       return approvalSheet({
         title: 'Approve and send to Director',
         message: 'Level 1 approval. Choose the Director for final approval.',
