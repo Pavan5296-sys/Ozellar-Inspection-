@@ -873,6 +873,7 @@ var ICONS = {
   menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
   users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><circle cx="17" cy="9" r="2.4"/><path d="M15.5 13.2c2.2.3 3.8 2 3.8 4.3"/></svg>',
   mail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5.5" width="17" height="13" rx="1.5"/><path d="M4 7l8 6 8-6"/></svg>',
+  lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
   signout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4.5H7a1.5 1.5 0 0 0-1.5 1.5v12A1.5 1.5 0 0 0 7 19.5h8"/><path d="M11 12h9.5M17.5 8.5 21 12l-3.5 3.5"/></svg>'
 };
 
@@ -2161,13 +2162,15 @@ function renderPasswordSetupHTML(){
   '</div>'+
   '<div class="section-pad" style="max-width:420px;margin:28px auto 0;">'+
     '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;display:flex;flex-direction:column;gap:12px;">'+
-      '<div style="font-weight:700;font-size:17px;color:var(--ink);">Create your password</div>'+
-      '<div style="color:var(--faint);font-size:14px;">You’re signed in as '+escapeHtml((sbUser&&sbUser.email)||'')+'. Set a password now so you can sign in directly next time, without waiting on a new email link. Not you? Use the icon above to sign out.</div>'+
+      '<div style="font-weight:700;font-size:17px;color:var(--ink);">'+(sbPwChangeMode?'Change your password':'Create your password')+'</div>'+
+      '<div style="color:var(--faint);font-size:14px;">'+(sbPwChangeMode
+        ? 'You’re signed in as '+escapeHtml((sbUser&&sbUser.email)||'')+'. Enter a new password below. You’ll use it the next time you sign in.'
+        : 'You’re signed in as '+escapeHtml((sbUser&&sbUser.email)||'')+'. Set a password now so you can sign in directly next time, without waiting on a new email link. Not you? Use the icon above to sign out.')+'</div>'+
       '<input type="password" id="pwSetupPassword" placeholder="New password" autocomplete="new-password" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">'+
       '<input type="password" id="pwSetupPassword2" placeholder="Confirm password" autocomplete="new-password" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">'+
       (sbSyncState.authError ? '<div style="color:var(--bad,#C1432A);font-size:13px;">'+escapeHtml(sbSyncState.authError)+'</div>' : '')+
       '<button class="btn btn-primary" id="pwSetupSave" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>'+(busy?'Please wait…':'Save password')+'</button>'+
-      '<button class="btn btn-outline" id="pwSetupSkip" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>Skip for now</button>'+
+      '<button class="btn btn-outline" id="pwSetupSkip" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>'+(sbPwChangeMode?'Cancel':'Skip for now')+'</button>'+
     '</div>'+
   '</div>';
 }
@@ -2179,6 +2182,7 @@ function wirePasswordSetup(){
   var skipBtn = document.getElementById('pwSetupSkip');
   if(skipBtn) skipBtn.addEventListener('click', function(){
     sbClearEmailLinkFlag();
+    sbPwChangeMode = false;
     sbNeedsPasswordSetup = false;
     sbSyncState.authError = null;
     renderSyncStatus();
@@ -2192,10 +2196,12 @@ function wirePasswordSetup(){
       if(res.error){ sbSyncState.authBusy=false; sbSyncState.authError=res.error.message; renderSyncStatus(); return; }
       sbClearEmailLinkFlag();
       return sb.rpc('mark_password_set').then(function(){},function(){}).then(function(){
+        var wasChange = sbPwChangeMode;
+        sbPwChangeMode = false;
         sbNeedsPasswordSetup = false;
         sbSyncState.authBusy = false;
         renderSyncStatus();
-        toast('Password set — you’re all set');
+        toast(wasChange ? 'Password changed' : 'Password set — you’re all set');
       });
     }).catch(sbAuthFailSafe);
   });
@@ -2865,7 +2871,13 @@ function wireUserAvatarButton(){
     openDropdownMenu(btnUserAvatar, [
       {header: (sbUser&&sbUser.email) || ''},
       {divider:true},
-      {label:'Sign out', icon:ICONS.signout, danger:true, onClick:function(){ sbSignOut(); }}
+      {label:'Change password', icon:ICONS.lock, onClick:function(){
+        sbPwChangeMode = true;
+        sbNeedsPasswordSetup = true;
+        sbSyncState.authError = null;
+        renderSyncStatus();
+      }},
+      {label:'Sign out', icon:ICONS.signout, danger:true, onClick:function(){ sbPwChangeMode = false; sbSignOut(); }}
     ]);
   });
 }
@@ -6995,6 +7007,8 @@ var currentRole = {type:'admin', fleet:null, userId:null, name:''};
 // hasn't chosen a password yet (see the PASSWORD SETUP section above).
 // Always re-derived by initUserRole() below, never set anywhere else.
 var sbNeedsPasswordSetup = false;
+// True while a signed-in user is changing their password from the account menu.
+var sbPwChangeMode = false;
 function initUserRole(){
   // Artifact-hosted runtime (Claude's own window.claude capabilities) —
   // a separate, older role store from the Supabase one below. Only ever
@@ -7054,7 +7068,7 @@ function initUserRole(){
   }
   if(email===BOOTSTRAP_ADMIN_EMAIL){
     currentRole = {type:'admin', fleet:null, userId:sbUser.id, name:currentRole.name||''};
-    sbNeedsPasswordSetup = false;
+    sbNeedsPasswordSetup = sbPwChangeMode || sbArrivedViaEmailLink;
     return Promise.resolve(currentRole);
   }
   return sb.from('user_roles').select('*').eq('email', email).maybeSingle().then(function(res){
@@ -7070,7 +7084,7 @@ function initUserRole(){
     // screen yet; treat anything else (true, or missing on an older row
     // this account somehow predates) as already set, never re-trap
     // someone who already has a working password.
-    sbNeedsPasswordSetup = (data.password_set===false) || sbArrivedViaEmailLink;
+    sbNeedsPasswordSetup = (data.password_set===false) || sbArrivedViaEmailLink || sbPwChangeMode;
     return currentRole;
   }).catch(function(){
     currentRole = {type:'unassigned', fleet:[], userId:sbUser.id, name:''};
