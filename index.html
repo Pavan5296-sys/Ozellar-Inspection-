@@ -2874,6 +2874,34 @@ function wireAssignUser(){
   });
 }
 
+/* APP UPDATE CHECK — an app saved to an iPhone Home Screen is often just
+   resumed, never reloaded, so it can keep running an old copy for days.
+   Whenever the app comes back to the foreground (and every 10 minutes),
+   compare this copy's version with the one online; if they differ, show a
+   bar to tap for the new version. */
+var APP_VERSION = '2026-09-25-1745';
+var appUpdateShown = false;
+function checkForAppUpdate(){
+  if(appUpdateShown || typeof fetch!=='function' || !navigator.onLine) return;
+  fetch(window.location.pathname+'?v='+Date.now(), {cache:'no-store'}).then(function(r){ return r.ok ? r.text() : ''; }).then(function(txt){
+    var m = /var APP_VERSION = '([^']+)'/.exec(txt||'');
+    if(!m || m[1]===APP_VERSION || appUpdateShown) return;
+    appUpdateShown = true;
+    var bar = document.createElement('button');
+    bar.type = 'button';
+    bar.textContent = 'A new version of the app is available — tap to update';
+    bar.style.cssText = 'position:fixed;left:12px;right:12px;bottom:16px;z-index:9999;padding:14px;border:0;border-radius:12px;background:#0E7C86;color:#fff;font-size:15px;font-weight:700;box-shadow:0 6px 20px rgba(0,0,0,.25);';
+    bar.addEventListener('click', function(){ window.location.reload(); });
+    document.body.appendChild(bar);
+  }).catch(function(){});
+}
+if(typeof document!=='undefined'){
+  document.addEventListener('visibilitychange', function(){ if(document.visibilityState==='visible') checkForAppUpdate(); });
+  window.addEventListener('focus', checkForAppUpdate);
+  setInterval(checkForAppUpdate, 10*60*1000);
+  setTimeout(checkForAppUpdate, 5000);
+}
+
 /* =====================================================================
    APPROVALS — two-level sign-off for a finished inspection.
      Vessel Manager submits -> picks a Tech Manager (one who has that
@@ -3158,13 +3186,16 @@ function approvalPanelHTML(insp){
       html += '<div class="appr-actions"><button class="btn btn-primary" id="btnApprApprove">'+(stage==='tm'?'Approve &amp; send to Director':'Give final approval')+'</button>'+
               '<button class="btn btn-outline" id="btnApprReturn" style="color:var(--bad,#C1432A);border-color:var(--bad,#C1432A);">Reject — return to '+escapeHtml((a.submittedBy&&(a.submittedBy.name||a.submittedBy.email))||'submitter')+'</button></div>';
     }
-  } else if(stage==='approved' || insp.status==='completed'){
-    html += '<div class="appr-status appr-ok-box"><strong>'+(stage==='approved'?'Approved':'Completed')+'</strong></div>';
+  } else if(stage==='approved'){
+    html += '<div class="appr-status appr-ok-box"><strong>Approved</strong></div>';
     if(isAdminRole()) html += '<div class="appr-actions"><button class="btn btn-outline" id="btnApprReopen">Reopen inspection (Admin)</button></div>';
   } else {
     if(stage==='returned'){
       html += '<div class="appr-status appr-ret-box"><strong>Rejected — returned for correction</strong><br><span>by '+escapeHtml(a.returnedBy||'')+'</span>'+
               (a.returnComment?'<br><span class="appr-h-comment">“'+escapeHtml(a.returnComment)+'”</span>':'')+'</div>';
+    }
+    if(insp.status==='completed'){
+      html += '<div class="appr-status appr-ok-box"><strong>Marked complete</strong><br><span class="appr-note">Not yet approved — submit it for approval below.</span></div>';
     }
     if(!isDirectorRole()){
       html += '<div class="appr-actions"><button class="btn btn-primary" id="btnApprSubmit">'+(stage==='returned'?'Resubmit for approval':'Submit for approval')+'</button></div>';
