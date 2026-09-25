@@ -12,7 +12,7 @@
    version when online; if the network is unavailable, fall back to the
    last successful copy of the app shell saved in this cache. */
 
-var CACHE = 'ozellar-app-shell-v1';
+var CACHE = 'ozellar-app-shell-v2';
 
 self.addEventListener('install', function (event) {
   self.skipWaiting();
@@ -26,13 +26,21 @@ self.addEventListener('install', function (event) {
 });
 
 self.addEventListener('activate', function (event) {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches.keys().then(function (keys) {
+      return Promise.all(keys.filter(function (k) { return k !== CACHE; })
+        .map(function (k) { return caches.delete(k); }));
+    }).then(function () { return self.clients.claim(); })
+  );
 });
 
 self.addEventListener('fetch', function (event) {
   if (event.request.mode !== 'navigate') return;
   event.respondWith(
-    fetch(event.request)
+    // cache:'no-store' skips the browser's HTTP cache (GitHub Pages lets
+    // it keep pages for 10 minutes), so a new upload reaches everyone the
+    // next time they open the app online.
+    fetch(event.request, { cache: 'no-store' })
       .then(function (res) {
         var copy = res.clone();
         caches.open(CACHE).then(function (cache) { cache.put(self.registration.scope, copy); });
