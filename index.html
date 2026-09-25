@@ -839,6 +839,35 @@ function inspectionSections(insp){
    directly on one inspection (customSections[].photoOnly). */
 var PHOTO_SECTION_MAX_PHOTOS = 100;
 function isPhotoOnlySection(sec){ return !!(sec && sec.photoOnly); }
+/* LIGHT MODE — a per-device switch on the home screen. When on, an
+   inspection's section list shows only Photo sections; question sections
+   are hidden (their data is untouched and the report is unchanged). */
+var appLightMode = false;
+try{ appLightMode = localStorage.getItem('ozellarLightMode')==='1'; }catch(e){}
+function setLightMode(on){
+  appLightMode = !!on;
+  try{ localStorage.setItem('ozellarLightMode', appLightMode?'1':'0'); }catch(e){}
+}
+function modeToggleHTML(){
+  return '<div class="section-pad" style="margin:0 0 12px;">'+
+    '<div class="seg" id="modeSeg" role="group" aria-label="Inspection mode">'+
+      '<button type="button" data-mode="normal" class="'+(appLightMode?'':'selected')+'">Normal mode</button>'+
+      '<button type="button" data-mode="light" class="'+(appLightMode?'selected':'')+'">Light mode</button>'+
+    '</div>'+
+    (appLightMode ? '<p class="footer-note" style="text-align:left;padding:6px 2px 0;">Light mode is on: inspections show Photo sections only.</p>' : '')+
+  '</div>';
+}
+function wireModeToggle(){
+  document.querySelectorAll('#modeSeg [data-mode]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var on = btn.getAttribute('data-mode')==='light';
+      if(on===appLightMode) return;
+      setLightMode(on);
+      toast(on ? 'Light mode on — Photo sections only' : 'Normal mode on');
+      render();
+    });
+  });
+}
 function defectNote(photos){
   var n = (photos||[]).filter(function(p){ return p && p.defect; }).length;
   return n ? ' ('+n+' defect'+(n>1?'s':'')+')' : '';
@@ -2847,6 +2876,7 @@ function renderHome(){
     '</div>'+
     syncStatusBarHTML()+
     (currentRole.type!=='admin' ? '<p class="footer-note" style="margin:0 0 10px;">Signed in as '+(isDirectorRole()?'Director':isTechManagerRole()?'Tech Manager':'Vessel Manager')+(currentRole.name?' \u00b7 '+escapeHtml(currentRole.name):'')+'</p>' : '')+
+    modeToggleHTML()+
     actionRowHtml+
     fleetStatusBannerHTML(vessels, allInspections)+
     (rows.length ? '' +
@@ -2877,6 +2907,7 @@ function filterHomeInspections(query){
 
 function wireHome(){
   wireSyncBar();
+  wireModeToggle();
 
   var btnNew = document.getElementById('btnNewInspection');
   if(btnNew) btnNew.addEventListener('click', function(){ navigate('form', {formMode:'new'}); });
@@ -3888,6 +3919,7 @@ function renderSectionList(){
       }
 
       var rows = sections.map(function(s, idx){
+        if(appLightMode && !isPhotoOnlySection(s)) return '';
         var done = counts[s.sr]||0, total = s.q.length;
         var badgeClass = done===0 ? '' : (done===total ? 'done' : 'partial');
         var displayNum = idx+1;
@@ -3902,6 +3934,7 @@ function renderSectionList(){
         '</button>';
       }).join('');
       var customRows = customSectionsList.map(function(cs){
+        if(appLightMode && !isPhotoOnlySection(cs)) return '';
         return customSectionRowHTML(cs, extrasCountMap[cs.id]||0, isPhotoOnlySection(cs) ? photoBadgeHTML(cs.id) : null);
       }).join('');
 
@@ -3918,7 +3951,9 @@ function renderSectionList(){
         '<input type="text" id="sectionSearchInput" placeholder="Search sections" autocomplete="off">'+
         '<button class="search-clear" id="sectionSearchClear" aria-label="Clear search" style="display:none;">'+ICONS.x+'</button>'+
       '</div>'+
+      (appLightMode ? '<div class="section-pad" style="margin:0 0 10px;"><div class="extras-hint" style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--accent-tint);border:1px solid var(--accent);border-radius:10px;padding:10px 12px;margin:0;color:var(--accent-dark);"><span><strong>Light mode</strong> \u00b7 Photo sections only</span><button class="btn-ghost" id="btnExitLightMode" style="padding:0;">Show all</button></div></div>' : '')+
       '<div id="sectionListBody">'+rows+customRows+'</div>'+
+      (appLightMode && !(rows+customRows) ? '<div class="empty-state" style="margin:6px 16px 16px;"><p>This inspection has no Photo sections.<br>Tap “Show all” to switch to Normal mode, or add a Photo section below.</p></div>' : '')+
       '<div class="empty-state" id="noSectionMatches" style="display:none;margin:6px 16px 16px;"><p>No sections match your search.</p></div>'+
       '<div class="section-pad" style="margin:4px 0 16px;">'+
         '<button class="btn btn-outline btn-block" id="btnAddSection">'+ICONS.plus+'Add section</button>'+
@@ -3945,6 +3980,8 @@ function filterSectionList(query){
   if(clearBtn) clearBtn.style.display = q==='' ? 'none' : '';
 }
 function wireSectionList(){
+  var btnExitLight = document.getElementById('btnExitLightMode');
+  if(btnExitLight) btnExitLight.addEventListener('click', function(){ setLightMode(false); toast('Normal mode on'); render(); });
   document.querySelectorAll('[data-open-section]').forEach(function(btn){
     btn.addEventListener('click', function(){
       navigate('section', {sectionSr: parseInt(btn.getAttribute('data-open-section'),10), customSectionId: null});
