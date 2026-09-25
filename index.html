@@ -2950,7 +2950,7 @@ function wireHome(){
   wireModeToggle();
 
   var btnNew = document.getElementById('btnNewInspection');
-  if(btnNew) btnNew.addEventListener('click', function(){ navigate('form', {formMode:'new'}); });
+  if(btnNew) btnNew.addEventListener('click', function(){ navigate('form', {formMode:'new', preselectVessel:null}); });
 
   var btnFleetStatus = document.getElementById('btnFleetStatus');
   if(btnFleetStatus) btnFleetStatus.addEventListener('click', function(){ navigate('fleetStatus'); });
@@ -3023,6 +3023,17 @@ function wireHome(){
     if(isAdminRole()) items.push({label:'Manage checklist', icon:ICONS.clipboard, onClick:function(){ navigate('manageChecklist'); }});
     if(isAdminRole()) items.push({label:'Manage users', icon:ICONS.users, onClick:function(){ navigate('manageUsers'); }});
     if(!isDirectorRole() && importInput) items.push({label:'Import backup', icon:ICONS.upload, onClick:function(){ importInput.click(); }});
+    if(isTechManagerRole() || isVesselManagerRole()){
+      var myFleet = (effectiveRole().fleet||[]).filter(function(n){ return (n||'').trim(); });
+      if(items.length) items.push({divider:true});
+      items.push({header:'My assigned vessels'+(myFleet.length?' ('+myFleet.length+')':'')});
+      if(!myFleet.length) items.push({header:'None assigned yet — ask your admin'});
+      myFleet.forEach(function(name){
+        items.push({label:name.trim(), icon:ICONS.ship, onClick:function(){
+          navigate('form', {formMode:'new', preselectVessel:name.trim()});
+        }});
+      });
+    }
     if(!items.length) return;
     openDropdownMenu(btnHomeMenu, items);
   });
@@ -3166,12 +3177,14 @@ function renderForm(){
       });
     }
     formVesselsCache = vessels;
-    var v = insp || {vesselName:'',imo:'',vesselType:'',port:'',date:todayISO(),inspector:'',company:'',vesselPhoto:null,
+    var v = insp || {vesselName:(state.formMode==='new' && state.preselectVessel) || '',imo:'',vesselType:'',port:'',date:todayISO(),inspector:'',company:'',vesselPhoto:null,
       inspectionType:'port', completionDate:'', sailFromDate:'', sailFromPort:'', sailToDate:'', sailToPort:'', remoteFromDate:'', remoteToDate:''};
     var inspType = v.inspectionType || 'port';
     var matchedVessel = vessels.find(function(ves){
       return v.vesselName && (ves.name||'').trim().toLowerCase()===v.vesselName.trim().toLowerCase();
     }) || null;
+    if(!insp && matchedVessel){ v.imo = matchedVessel.imo||''; v.vesselType = matchedVessel.vesselType||''; }
+    state.preselectVessel = null;
     vesselPhotoDraft = {blob: v.vesselPhoto ? v.vesselPhoto.blob : null, changed:false};
     var previewPromise = vesselPhotoDraft.blob ? blobToDataURL(vesselPhotoDraft.blob).catch(function(){ return ''; }) : Promise.resolve('');
     return previewPromise.then(function(dataUrl){
