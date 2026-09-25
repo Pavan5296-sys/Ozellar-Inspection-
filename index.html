@@ -2572,7 +2572,7 @@ function renderManageUsers(){
     var rows = res.data || [];
     manageUsersCache = {};
     rows.forEach(function(r){
-      manageUsersCache[r.email] = {name:r.name||'', role:r.role||'', fleet:r.fleet||[]};
+      manageUsersCache[r.email] = {name:r.name||'', role:r.role||'', fleet:r.fleet||[], designation:r.designation||''};
     });
     var rowsHtml = rows.map(function(r){
       var info = manageUsersCache[r.email];
@@ -2581,7 +2581,7 @@ function renderManageUsers(){
       return '' +
       '<div class="inspection-card" data-user-row="'+escapeHtml(r.email)+'">'+
         '<div class="body">'+
-          '<div class="vname">'+escapeHtml(info.name||r.email)+'</div>'+
+          '<div class="vname">'+escapeHtml(info.name||r.email)+(info.designation?' <span style="font-weight:500;color:var(--faint);">\u2014 '+escapeHtml(info.designation)+'</span>':'')+'</div>'+
           '<div class="vmeta">'+escapeHtml(r.email)+' \u00b7 '+escapeHtml(roleLabel)+(fleetNote?' \u00b7 '+escapeHtml(fleetNote):'')+'</div>'+
         '</div>'+
         '<button class="icon-btn" data-menu-user="'+escapeHtml(r.email)+'" aria-label="More options">'+ICONS.dots+'</button>'+
@@ -2603,7 +2603,7 @@ function wireManageUsers(){
 
   var addBtn = document.getElementById('btnAssignUser');
   if(addBtn) addBtn.addEventListener('click', function(){
-    navigate('assignUser', {assignUserEmail:null, assignUserName:'', assignUserRole:'', assignUserFleet:[]});
+    navigate('assignUser', {assignUserEmail:null, assignUserName:'', assignUserDesignation:'', assignUserRole:'', assignUserFleet:[]});
   });
 
   document.querySelectorAll('[data-menu-user]').forEach(function(btn){
@@ -2613,7 +2613,7 @@ function wireManageUsers(){
       var info = manageUsersCache[email] || {name:'',role:'',fleet:[]};
       openSheet([
         {label:'Edit role', icon:ICONS.edit, onClick:function(){
-          navigate('assignUser', {assignUserEmail:email, assignUserName:info.name, assignUserRole:info.role, assignUserFleet:info.fleet});
+          navigate('assignUser', {assignUserEmail:email, assignUserName:info.name, assignUserDesignation:info.designation||'', assignUserRole:info.role, assignUserFleet:info.fleet});
         }},
         {label:'Set password', icon:ICONS.lock, onClick:function(){
           showSetPasswordSheet(email, info.role, info.name);
@@ -2773,6 +2773,50 @@ function sbSendInviteEmail(email){
   var redirectTo = (typeof window!=='undefined' && window.location) ? (window.location.origin + window.location.pathname) : undefined;
   return sb.auth.signInWithOtp({email:email, options:{shouldCreateUser:true, emailRedirectTo:redirectTo}});
 }
+/* DESIGNATION — picked from a list (common shipping titles, plus any
+   title already given to someone in Manage users), with "Other…" to type
+   a new one. Stored as plain text on the user's row. */
+var DESIGNATION_PRESETS = ['Master','Chief Engineer','Chief Officer','Second Engineer','Vessel Manager',
+  'Technical Superintendent','Marine Superintendent','Fleet Manager','Technical Manager','Technical Director',
+  'Director','QHSE Manager','Crewing Manager','Purchase Manager','Admin'];
+function designationOptions(){
+  var seen = {}, list = [];
+  function add(d){ d = (d||'').trim(); if(d && !seen[d.toLowerCase()]){ seen[d.toLowerCase()] = true; list.push(d); } }
+  DESIGNATION_PRESETS.forEach(add);
+  Object.keys(manageUsersCache||{}).forEach(function(k){ add((manageUsersCache[k]||{}).designation); });
+  return list;
+}
+function designationFieldHTML(current){
+  var opts = designationOptions();
+  if(current && opts.map(function(o){return o.toLowerCase();}).indexOf(current.toLowerCase())===-1) opts.push(current);
+  return '<div class="field">'+
+    '<label>Designation</label>'+
+    '<select id="assignDesignationSelect">'+
+      '<option value=""'+(current?'':' selected')+'>Choose designation…</option>'+
+      opts.map(function(o){ return '<option value="'+escapeHtml(o)+'"'+(current && o.toLowerCase()===current.toLowerCase()?' selected':'')+'>'+escapeHtml(o)+'</option>'; }).join('')+
+      '<option value="__other__">Other… (type a new one)</option>'+
+    '</select>'+
+    '<input type="text" id="assignDesignationOther" placeholder="Type the designation" autocomplete="off" style="display:none;margin-top:8px;">'+
+  '</div>';
+}
+function wireDesignationField(){
+  var sel = document.getElementById('assignDesignationSelect');
+  var other = document.getElementById('assignDesignationOther');
+  if(sel && other) sel.addEventListener('change', function(){
+    var isOther = sel.value==='__other__';
+    other.style.display = isOther ? '' : 'none';
+    if(isOther) other.focus();
+  });
+}
+function readDesignationField(){
+  var sel = document.getElementById('assignDesignationSelect');
+  if(!sel) return '';
+  if(sel.value==='__other__'){
+    var other = document.getElementById('assignDesignationOther');
+    return ((other && other.value) || '').trim();
+  }
+  return sel.value || '';
+}
 function renderAssignUser(){
   if(!guardAdminOnly()) return Promise.resolve('<div class="loading">Redirecting…</div>');
   var isEdit = !!state.assignUserEmail;
@@ -2802,6 +2846,7 @@ function renderAssignUser(){
         '<label>Name <span class="footer-note" style="display:inline;padding:0;">(optional, for your own reference)</span></label>'+
         '<input type="text" id="assignNameInput" placeholder="Their name" autocomplete="off" value="'+escapeHtml(state.assignUserName||'')+'">'+
       '</div>'+
+      designationFieldHTML(state.assignUserDesignation||'')+
       (isEdit ? '' :
       '<div class="field">'+
         '<label>Initial password <span class="footer-note" style="display:inline;padding:0;">(optional)</span></label>'+
@@ -2830,6 +2875,7 @@ function renderAssignUser(){
   });
 }
 function wireAssignUser(){
+  wireDesignationField();
   var backBtn = document.querySelector('.appbar .back');
   if(backBtn) backBtn.addEventListener('click', function(){ navigate('manageUsers'); });
   var cancelBtn = document.getElementById('btnCancelAssign');
@@ -2861,6 +2907,7 @@ function wireAssignUser(){
     var nameInput = document.getElementById('assignNameInput');
     var email = isEdit ? (state.assignUserEmail||'') : ((emailInput && emailInput.value) || '').trim().toLowerCase();
     var name = ((nameInput && nameInput.value) || '').trim();
+    var designation = readDesignationField();
     if(!email || email.indexOf('@')===-1){ toast('Enter a valid email address'); return; }
     var roleBtn = roleSeg ? roleSeg.querySelector('button.selected') : null;
     var role = roleBtn ? roleBtn.getAttribute('data-val') : '';
@@ -2877,9 +2924,15 @@ function wireAssignUser(){
       return;
     }
     saveBtn.disabled = true;
-    sb.from('user_roles').upsert({
-      email: email, role: role, fleet: fleet, name: name, updated_at: new Date().toISOString()
-    }, {onConflict:'email'}).then(function(res){
+    var roleRow = {email: email, role: role, fleet: fleet, name: name, designation: designation, updated_at: new Date().toISOString()};
+    sb.from('user_roles').upsert(roleRow, {onConflict:'email'}).then(function(res){
+      if(res.error && /designation/i.test(res.error.message||'')){
+        delete roleRow.designation;
+        toast('Designation not saved — run the designation SQL in Supabase first');
+        return sb.from('user_roles').upsert(roleRow, {onConflict:'email'});
+      }
+      return res;
+    }).then(function(res){
       saveBtn.disabled = false;
       if(res.error){ toast('Could not save — try again'); return; }
       var wasEdit = isEdit;
@@ -2916,7 +2969,7 @@ function wireAssignUser(){
    Whenever the app comes back to the foreground (and every 10 minutes),
    compare this copy's version with the one online; if they differ, show a
    bar to tap for the new version. */
-var APP_VERSION = '2026-09-25-1805';
+var APP_VERSION = '2026-09-25-2115';
 var appUpdateShown = false;
 function checkForAppUpdate(){
   if(appUpdateShown || typeof fetch!=='function' || !navigator.onLine) return;
@@ -2962,7 +3015,7 @@ function loadAppUsers(force){
   return sb.rpc('list_app_users').then(function(res){
     if(res.error){ appUsersError = res.error.message || 'error'; return appUsersCache || []; }
     appUsersCache = (res.data||[]).map(function(u){
-      return {email:(u.email||'').trim().toLowerCase(), name:u.name||'', role:u.role||'', fleet:u.fleet||[]};
+      return {email:(u.email||'').trim().toLowerCase(), name:u.name||'', role:u.role||'', fleet:u.fleet||[], designation:u.designation||''};
     });
     return appUsersCache;
   }).catch(function(e){ appUsersError = (e && e.message) || 'offline'; return appUsersCache || []; });
@@ -2995,7 +3048,12 @@ function canActOnApproval(insp){
   if(a.stage==='director') return isDirectorRole() && a.directorEmail===me;
   return false;
 }
-function personLabel(name, email){ return name ? name+' ('+email+')' : (email||''); }
+function personLabel(name, email, designation){
+  var who = name || '';
+  if(designation) who = who ? who+' \u2014 '+designation : designation;
+  return who ? who+' ('+(email||'')+')' : (email||'');
+}
+function myLabel(){ return personLabel(currentRole.name, myEmail(), currentRole.designation); }
 function inspStatusLabel(insp){
   if(!insp) return '';
   var a = insp.approval;
@@ -3033,7 +3091,7 @@ function approvalSheet(opts){
       (opts.message ? '<p style="color:var(--faint);font-size:14px;">'+escapeHtml(opts.message)+'</p>' : '')+
       (people ? '<div class="field"><label>'+escapeHtml(opts.pickLabel||'Send to')+'</label><select id="apprPerson">'+
         '<option value="" selected disabled>Choose…</option>'+
-        people.map(function(p){ return '<option value="'+escapeHtml(p.email)+'">'+escapeHtml(personLabel(p.name, p.email))+'</option>'; }).join('')+
+        people.map(function(p){ return '<option value="'+escapeHtml(p.email)+'">'+escapeHtml(personLabel(p.name, p.email, p.designation))+'</option>'; }).join('')+
       '</select></div>' : '')+
       '<div class="field"><label>'+(opts.commentRequired?'Comment <span class="req">*</span>':'Comment (optional)')+'</label>'+
         '<textarea id="apprComment" rows="3" placeholder="'+escapeHtml(opts.commentPlaceholder||'Add a note…')+'"></textarea></div>'+
@@ -3056,7 +3114,7 @@ function approvalSheet(opts){
         person = people.filter(function(p){ return p.email===em; })[0];
       }
       if(opts.commentRequired && !comment){ toast('Please add a comment'); return; }
-      finish({email: person?person.email:'', name: person?person.name:'', comment: comment});
+      finish({email: person?person.email:'', name: person?person.name:'', designation: person?(person.designation||''):'', comment: comment});
     });
   });
 }
@@ -3090,7 +3148,7 @@ function saveApproval(insp){
   });
 }
 function historyEntry(action, level, comment){
-  return {action: action, level: level||'', byEmail: myEmail(), byName: currentRole.name||'', byRole: currentRole.type, at: Date.now(), comment: comment||''};
+  return {action: action, level: level||'', byEmail: myEmail(), byName: currentRole.name||'', byDesignation: currentRole.designation||'', byRole: currentRole.type, at: Date.now(), comment: comment||''};
 }
 
 function submitForApproval(insp){
@@ -3116,16 +3174,16 @@ function submitForApproval(insp){
       var prev = insp.approval || {};
       insp.approval = {
         stage: toTm ? 'tm' : 'director',
-        submittedBy: {email: myEmail(), name: currentRole.name||'', role: currentRole.type},
+        submittedBy: {email: myEmail(), name: currentRole.name||'', designation: currentRole.designation||'', role: currentRole.type},
         submittedAt: Date.now(),
-        tmEmail: toTm ? r.email : '', tmName: toTm ? r.name : '',
-        directorEmail: toTm ? '' : r.email, directorName: toTm ? '' : r.name,
+        tmEmail: toTm ? r.email : '', tmName: toTm ? r.name : '', tmDesignation: toTm ? r.designation : '',
+        directorEmail: toTm ? '' : r.email, directorName: toTm ? '' : r.name, directorDesignation: toTm ? '' : r.designation,
         history: (prev.history||[]).concat([historyEntry('submitted', toTm?'To Tech Manager':'To Director', r.comment)])
       };
       insp.status = 'pending_approval';
       return saveApproval(insp).then(function(){
         sendApprovalEmail(r.email, r.name, 'Approval needed: '+notifyText(insp),
-          personLabel(currentRole.name, myEmail())+' submitted the '+notifyText(insp)+' for your approval.'+(r.comment?'\n\nComment: '+r.comment:''));
+          myLabel()+' submitted the '+notifyText(insp)+' for your approval.'+(r.comment?'\n\nComment: '+r.comment:''));
         toast('Submitted for approval');
         return true;
       });
@@ -3146,10 +3204,10 @@ function approveInspection(insp){
       }).then(function(r){
         if(!r) return false;
         a.history = (a.history||[]).concat([historyEntry('approved', 'Level 1 — Tech Manager', r.comment)]);
-        a.stage = 'director'; a.directorEmail = r.email; a.directorName = r.name;
+        a.stage = 'director'; a.directorEmail = r.email; a.directorName = r.name; a.directorDesignation = r.designation||'';
         return saveApproval(insp).then(function(){
           sendApprovalEmail(r.email, r.name, 'Final approval needed: '+notifyText(insp),
-            'The '+notifyText(insp)+' was approved by '+personLabel(currentRole.name, myEmail())+' and needs your final approval.'+(r.comment?'\n\nComment: '+r.comment:''));
+            'The '+notifyText(insp)+' was approved by '+myLabel()+' and needs your final approval.'+(r.comment?'\n\nComment: '+r.comment:''));
           sendApprovalEmail(a.submittedBy && a.submittedBy.email, a.submittedBy && a.submittedBy.name, 'Level 1 approved: '+notifyText(insp),
             'Your '+notifyText(insp)+' was approved by the Tech Manager and has gone to the Director for final approval.');
           toast('Approved — sent to Director');
@@ -3164,7 +3222,7 @@ function approveInspection(insp){
     a.stage = 'approved'; a.approvedAt = Date.now();
     insp.status = 'completed';
     return saveApproval(insp).then(function(){
-      var msg = 'The '+notifyText(insp)+' has received final approval from '+personLabel(currentRole.name, myEmail())+'.'+(r.comment?'\n\nComment: '+r.comment:'');
+      var msg = 'The '+notifyText(insp)+' has received final approval from '+myLabel()+'.'+(r.comment?'\n\nComment: '+r.comment:'');
       sendApprovalEmail(a.submittedBy && a.submittedBy.email, a.submittedBy && a.submittedBy.name, 'Approved: '+notifyText(insp), msg);
       if(a.tmEmail) sendApprovalEmail(a.tmEmail, a.tmName, 'Approved: '+notifyText(insp), msg);
       toast('Inspection approved');
@@ -3176,17 +3234,17 @@ function approveInspection(insp){
 function returnInspection(insp){
   var a = insp.approval;
   return approvalSheet({
-    title: 'Reject report', message: 'It goes back to '+personLabel(a.submittedBy&&a.submittedBy.name, a.submittedBy&&a.submittedBy.email)+' ('+roleLabelOf(a.submittedBy&&a.submittedBy.role)+'), unlocked for correction.',
+    title: 'Reject report', message: 'It goes back to '+personLabel(a.submittedBy&&a.submittedBy.name, a.submittedBy&&a.submittedBy.email, a.submittedBy&&a.submittedBy.designation)+' ('+roleLabelOf(a.submittedBy&&a.submittedBy.role)+'), unlocked for correction.',
     commentRequired: true, commentPlaceholder: 'Reason for rejection / what needs to be corrected', okLabel: 'Reject', danger: true
   }).then(function(r){
     if(!r) return false;
     var level = a.stage==='tm' ? 'Level 1 — Tech Manager' : 'Final — Director';
     a.history = (a.history||[]).concat([historyEntry('rejected', level, r.comment)]);
-    a.stage = 'returned'; a.returnComment = r.comment; a.returnedBy = personLabel(currentRole.name, myEmail());
+    a.stage = 'returned'; a.returnComment = r.comment; a.returnedBy = myLabel();
     insp.status = 'in_progress';
     return saveApproval(insp).then(function(){
       sendApprovalEmail(a.submittedBy && a.submittedBy.email, a.submittedBy && a.submittedBy.name, 'Rejected: '+notifyText(insp),
-        'Your '+notifyText(insp)+' was rejected by '+personLabel(currentRole.name, myEmail())+' and returned to you for correction.\n\nReason: '+r.comment);
+        'Your '+notifyText(insp)+' was rejected by '+myLabel()+' and returned to you for correction.\n\nReason: '+r.comment);
       toast('Rejected — returned to '+((a.submittedBy&&(a.submittedBy.name||a.submittedBy.email))||'submitter'));
       return true;
     });
@@ -3199,7 +3257,7 @@ function approvalHistoryHTML(insp){
   return '<div class="appr-history">'+h.map(function(e){
     var verb = e.action==='submitted' ? 'Submitted' : e.action==='approved' ? 'Approved' : e.action==='rejected' ? 'Rejected' : 'Returned';
     return '<div class="appr-h-row"><div><strong>'+verb+'</strong>'+(e.level?' · '+escapeHtml(e.level):'')+'</div>'+
-      '<div class="appr-h-meta">'+escapeHtml(personLabel(e.byName, e.byEmail))+' · '+escapeHtml(roleLabelOf(e.byRole))+' · '+escapeHtml(new Date(e.at).toLocaleString())+'</div>'+
+      '<div class="appr-h-meta">'+escapeHtml(personLabel(e.byName, e.byEmail, e.byDesignation))+' · '+escapeHtml(roleLabelOf(e.byRole))+' · '+escapeHtml(new Date(e.at).toLocaleString())+'</div>'+
       (e.comment ? '<div class="appr-h-comment">“'+escapeHtml(e.comment)+'”</div>' : '')+'</div>';
   }).join('')+'</div>';
 }
@@ -3207,7 +3265,7 @@ function approvalHistoryLines(insp){
   var h = (insp.approval && insp.approval.history) || [];
   return h.map(function(e){
     var verb = e.action==='submitted' ? 'Submitted' : e.action==='approved' ? 'Approved' : e.action==='rejected' ? 'Rejected' : 'Returned';
-    return verb+(e.level?' ('+e.level+')':'')+' by '+personLabel(e.byName, e.byEmail)+', '+roleLabelOf(e.byRole)+', '+new Date(e.at).toLocaleString()+(e.comment?' — "'+e.comment+'"':'');
+    return verb+(e.level?' ('+e.level+')':'')+' by '+personLabel(e.byName, e.byEmail, e.byDesignation)+', '+roleLabelOf(e.byRole)+', '+new Date(e.at).toLocaleString()+(e.comment?' — "'+e.comment+'"':'');
   });
 }
 
@@ -3217,7 +3275,7 @@ function approvalPanelHTML(insp){
   var a = insp.approval, html = '<div class="appr-panel">';
   var stage = approvalStage(insp);
   if(stage==='tm' || stage==='director'){
-    var who = stage==='tm' ? personLabel(a.tmName, a.tmEmail) : personLabel(a.directorName, a.directorEmail);
+    var who = stage==='tm' ? personLabel(a.tmName, a.tmEmail, a.tmDesignation) : personLabel(a.directorName, a.directorEmail, a.directorDesignation);
     html += '<div class="appr-status appr-wait-box"><strong>'+(stage==='tm'?'Waiting for Tech Manager approval':'Waiting for Director final approval')+'</strong><br><span>'+escapeHtml(who)+'</span><br><span class="appr-note">Editing is locked until it’s approved or returned.</span></div>';
     if(canActOnApproval(insp)){
       html += '<div class="appr-actions"><button class="btn btn-primary" id="btnApprApprove">'+(stage==='tm'?'Approve &amp; send to Director':'Give final approval')+'</button>'+
@@ -3259,7 +3317,7 @@ function wireApprovalPanel(){
       if(!ok) return false;
       if(insp.approval){
         insp.approval.history = (insp.approval.history||[]).concat([historyEntry('returned', 'Reopened by Admin', '')]);
-        insp.approval.stage = 'returned'; insp.approval.returnedBy = personLabel(currentRole.name, myEmail()); insp.approval.returnComment = 'Reopened by Admin';
+        insp.approval.stage = 'returned'; insp.approval.returnedBy = myLabel(); insp.approval.returnComment = 'Reopened by Admin';
       }
       insp.status = 'in_progress';
       return saveApproval(insp).then(function(){ toast('Inspection reopened'); return true; });
@@ -3280,7 +3338,7 @@ function approvalNoticesHTML(allInspections){
   var html = '<div class="section-pad" style="margin:0 0 12px;">';
   if(waiting.length){
     html += '<div class="appr-notice"><div class="appr-notice-title"><span class="appr-badge">'+waiting.length+'</span> Waiting for your approval</div>'+
-      waiting.map(function(i){ return row(i, i.approval.stage==='tm'?'Level 1 · from '+personLabel(i.approval.submittedBy.name, i.approval.submittedBy.email):'Final approval'); }).join('')+'</div>';
+      waiting.map(function(i){ return row(i, i.approval.stage==='tm'?'Level 1 · from '+personLabel(i.approval.submittedBy.name, i.approval.submittedBy.email, i.approval.submittedBy.designation):'Final approval'); }).join('')+'</div>';
   }
   if(returned.length){
     html += '<div class="appr-notice appr-notice-ret"><div class="appr-notice-title"><span class="appr-badge appr-badge-ret">'+returned.length+'</span> Rejected — returned to you for correction</div>'+
@@ -3416,7 +3474,7 @@ function renderHome(){
       (sb && sbUser ? '<button class="avatar-btn" id="btnUserAvatar" aria-label="Account" title="'+escapeHtml(sbUser.email||'')+'">'+escapeHtml(userAvatarInitial())+'</button>' : '')+
     '</div>'+
     syncStatusBarHTML()+
-    (currentRole.type!=='admin' ? '<p class="footer-note" style="margin:0 0 10px;">Signed in as '+(isDirectorRole()?'Director':isTechManagerRole()?'Tech Manager':'Vessel Manager')+(currentRole.name?' \u00b7 '+escapeHtml(currentRole.name):'')+'</p>' : '')+
+    (currentRole.type!=='admin' ? '<p class="footer-note" style="margin:0 0 10px;">Signed in as '+(isDirectorRole()?'Director':isTechManagerRole()?'Tech Manager':'Vessel Manager')+(currentRole.name?' \u00b7 '+escapeHtml(currentRole.name):'')+(currentRole.designation?' \u2014 '+escapeHtml(currentRole.designation):'')+'</p>' : '')+
     approvalNoticesHTML(allInspections)+
     modeToggleHTML()+
     actionRowHtml+
@@ -3560,6 +3618,7 @@ function wireUserAvatarButton(){
     e.stopPropagation();
     openDropdownMenu(btnUserAvatar, [
       {header: (sbUser&&sbUser.email) || ''},
+      {header: [currentRole.name, currentRole.designation].filter(Boolean).join(' \u2014 ')},
       {divider:true},
       {label:'Change password', icon:ICONS.lock, onClick:function(){
         sbPwChangeMode = true;
@@ -7903,7 +7962,7 @@ function initUserRole(){
       return currentRole;
     }
     var data = res.data;
-    currentRole = {type:data.role||'unassigned', fleet:data.fleet||[], userId:sbUser.id, name:data.name||''};
+    currentRole = {type:data.role||'unassigned', fleet:data.fleet||[], userId:sbUser.id, name:data.name||'', designation:data.designation||''};
     // password_set is only ever explicitly false for a brand-new,
     // admin-invited row that hasn't been through the password-setup
     // screen yet; treat anything else (true, or missing on an older row
