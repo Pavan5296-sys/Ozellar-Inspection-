@@ -759,6 +759,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 body.insp-locked #app .qcard, body.insp-locked #app .extras-card, body.insp-locked #app #customFindingsList,
 body.insp-locked #app #btnAddCustomFinding, body.insp-locked #app textarea, body.insp-locked #app .photo-btns,
 body.insp-locked #app #btnAddSection, body.insp-locked #app #btnSaveForm{pointer-events:none;}
+body.insp-locked #app .edit-link, body.insp-locked #app #btnDeleteCustomSection, body.insp-locked #app #btnPhotoSectionToAll, body.insp-locked #app #btnAddSection{display:none;}
+body.insp-locked #app .thumb .del, body.insp-locked #app .thumb .move{display:none;}
 body.insp-locked #app textarea{opacity:.8;}
 #app[data-lock-msg]::before{content:attr(data-lock-msg);display:block;background:#E6F0FA;color:#1F5C99;font-size:13px;font-weight:600;text-align:center;padding:8px 12px;}
 </style>
@@ -1413,6 +1415,9 @@ function createInspection(data){
   return idbPut('inspections', insp).then(function(){ return insp; });
 }
 function updateInspectionMeta(id, data){
+  return guardedWrite(id, function(){ return updateInspectionMetaRaw(id, data); });
+}
+function updateInspectionMetaRaw(id, data){
   return idbGet('inspections', id).then(function(insp){
     if(!insp) throw new Error('Inspection not found');
     insp.vesselName = (data.vesselName||'').trim();
@@ -1575,6 +1580,9 @@ function applyRemoteTombstone(id){
   });
 }
 function deleteInspectionCascade(id){
+  return guardedWrite(id, function(){ return deleteInspectionCascadeRaw(id); });
+}
+function deleteInspectionCascadeRaw(id){
   /* Tombstone written FIRST and durably, before anything else: even if the
      app is closed a split second later (cutting off the cloud call below),
      this device will never again mistake the cloud's lingering copy for
@@ -1668,9 +1676,30 @@ function saveAndVerify(storeName, rec, attemptsLeft){
     throw err;
   });
 }
+/* EDIT LOCK — enforced at the save/delete layer, not just on screen:
+   Directors never change inspections, and nobody changes one that is
+   waiting for approval or already approved (until an Admin reopens it).
+   Approval steps themselves write through saveApproval, not these. */
+function inspectionEditBlocked(inspectionId){
+  if(typeof isDirectorRole==='function' && isDirectorRole()) return Promise.resolve('Directors have view-only access');
+  if(!inspectionId) return Promise.resolve(null);
+  return idbGet('inspections', inspectionId).then(function(insp){
+    if(insp && insp.approval && (insp.approval.stage==='tm' || insp.approval.stage==='director')) return 'Locked — this inspection is waiting for approval';
+    if(insp && insp.approval && insp.approval.stage==='approved') return 'Locked — this inspection is approved';
+    return null;
+  }).catch(function(){ return null; });
+}
+function guardedWrite(inspectionId, doWrite, fallback){
+  return inspectionEditBlocked(inspectionId).then(function(msg){
+    if(msg){ toast(msg); if(fallback!==undefined) return fallback; throw new Error('locked'); }
+    return doWrite();
+  });
+}
 function saveResponse(rec){
-  rec.updatedAt = Date.now();
-  return saveAndVerify('responses', rec);
+  return guardedWrite(rec.inspectionId, function(){
+    rec.updatedAt = Date.now();
+    return saveAndVerify('responses', rec);
+  }, rec);
 }
 function extrasKey(inspectionId, sectionSr){ return inspectionId+'__'+sectionSr; }
 function getOrCreateSectionExtras(inspectionId, sectionSr){
@@ -1685,8 +1714,10 @@ function getOrCreateSectionExtras(inspectionId, sectionSr){
   });
 }
 function saveSectionExtras(rec){
-  rec.updatedAt = Date.now();
-  return saveAndVerify('sectionExtras', rec);
+  return guardedWrite(rec.inspectionId, function(){
+    rec.updatedAt = Date.now();
+    return saveAndVerify('sectionExtras', rec);
+  }, rec);
 }
 
 /* Every edit (Applicable, Finding, Remark, Corrective/Preventive Action,
@@ -1726,6 +1757,9 @@ function updateExtras(inspectionId, sectionSr, mutateFn){
 }
 
 function createCustomSection(inspectionId, name, photoOnly){
+  return guardedWrite(inspectionId, function(){ return createCustomSectionRaw(inspectionId, name, photoOnly); });
+}
+function createCustomSectionRaw(inspectionId, name, photoOnly){
   var cs = {id:'cs_'+uid(), inspectionId:inspectionId, name:name, createdAt:Date.now(), updatedAt:Date.now()};
   if(photoOnly) cs.photoOnly = true;
   return idbPut('customSections', cs).then(function(){ return cs; });
@@ -1737,6 +1771,9 @@ function getCustomSections(inspectionId){
   });
 }
 function deleteCustomSection(inspectionId, id){
+  return guardedWrite(inspectionId, function(){ return deleteCustomSectionRaw(inspectionId, id); });
+}
+function deleteCustomSectionRaw(inspectionId, id){
   return idbDelete('sectionExtras', extrasKey(inspectionId, id)).then(function(){
     return idbDelete('customSections', id);
   }).then(function(result){
@@ -2879,7 +2916,7 @@ function wireAssignUser(){
    Whenever the app comes back to the foreground (and every 10 minutes),
    compare this copy's version with the one online; if they differ, show a
    bar to tap for the new version. */
-var APP_VERSION = '2026-09-25-1745';
+var APP_VERSION = '2026-09-25-1805';
 var appUpdateShown = false;
 function checkForAppUpdate(){
   if(appUpdateShown || typeof fetch!=='function' || !navigator.onLine) return;
@@ -3268,11 +3305,11 @@ function refreshInspectionLock(){
     return;
   }
   idbGet('inspections', state.inspectionId).then(function(insp){
-    var locked = !!(insp && (isAwaitingApproval(insp) || isApproved(insp)));
+    var locked = !!(insp && (isDirectorRole() || isAwaitingApproval(insp) || isApproved(insp)));
     document.body.classList.toggle('insp-locked', locked);
     var app = document.getElementById('app');
     if(app){
-      if(locked) app.setAttribute('data-lock-msg', isApproved(insp) ? 'Approved — view only' : 'Waiting for approval — editing is locked');
+      if(locked) app.setAttribute('data-lock-msg', isAwaitingApproval(insp) ? 'Waiting for approval — editing is locked' : isApproved(insp) ? 'Approved — view only' : 'View only');
       else app.removeAttribute('data-lock-msg');
     }
   }).catch(function(){});
@@ -3450,19 +3487,24 @@ function wireHome(){
     btn.addEventListener('click', function(e){
       e.stopPropagation();
       var id = btn.getAttribute('data-menu-insp');
-      openSheet([
-        {label:'Open inspection', icon:ICONS.chevron, onClick:function(){ navigate('sections',{inspectionId:id}); }},
-        {label:'Edit vessel details', icon:ICONS.edit, onClick:function(){ navigate('form',{formMode:'edit', inspectionId:id}); }},
-        {label:'Export backup (JSON)', icon:ICONS.json, onClick:function(){ exportInspectionJSON(id); }},
-        {label:'Export CSV', icon:ICONS.csv, onClick:function(){ exportInspectionCSV(id); }},
-        {divider:true},
-        {label:'Delete inspection', icon:ICONS.trash, danger:true, onClick:function(){
-          showConfirm('Delete this inspection and all its answers and photos? This cannot be undone.').then(function(ok){
-            if(!ok) return;
-            deleteInspectionCascade(id).then(function(){ toast('Inspection deleted'); render(); });
-          });
-        }}
-      ]);
+      inspectionEditBlocked(id).then(function(blockedMsg){
+        var items = [
+          {label:'Open inspection', icon:ICONS.chevron, onClick:function(){ navigate('sections',{inspectionId:id}); }}
+        ];
+        if(!blockedMsg) items.push({label:'Edit vessel details', icon:ICONS.edit, onClick:function(){ navigate('form',{formMode:'edit', inspectionId:id}); }});
+        items.push({label:'Export backup (JSON)', icon:ICONS.json, onClick:function(){ exportInspectionJSON(id); }});
+        items.push({label:'Export CSV', icon:ICONS.csv, onClick:function(){ exportInspectionCSV(id); }});
+        if(!blockedMsg){
+          items.push({divider:true});
+          items.push({label:'Delete inspection', icon:ICONS.trash, danger:true, onClick:function(){
+            showConfirm('Delete this inspection and all its answers and photos? This cannot be undone.').then(function(ok){
+              if(!ok) return;
+              deleteInspectionCascade(id).then(function(){ toast('Inspection deleted'); render(); }).catch(function(){});
+            });
+          }});
+        }
+        openSheet(items);
+      });
     });
   });
 
@@ -3843,7 +3885,7 @@ function wireForm(){
       updateInspectionMeta(state.inspectionId, data).then(function(){
         toast('Details updated');
         navigate('report', {inspectionId: state.inspectionId});
-      });
+      }).catch(function(){});
     } else {
       createInspection(data).then(function(insp){
         navigate('sections', {inspectionId: insp.id});
@@ -4531,7 +4573,7 @@ function wireSectionList(){
       var id = btn.getAttribute('data-del-custom-section');
       showConfirm('Remove this section and everything logged in it?').then(function(ok){
         if(!ok) return;
-        deleteCustomSection(state.inspectionId, id).then(function(){ toast('Section removed'); render(); });
+        deleteCustomSection(state.inspectionId, id).then(function(){ toast('Section removed'); render(); }).catch(function(){});
       });
     });
   });
@@ -4573,7 +4615,7 @@ function wireSectionList(){
       if(!ok || !currentInspDraft) return;
       currentInspDraft.vesselPhoto = null;
       currentInspDraft.updatedAt = Date.now();
-      idbPut('inspections', currentInspDraft).then(function(){ refreshCoverPhotoPreview(null); toast('Cover photo removed'); });
+      guardedWrite(currentInspDraft.id, function(){ return idbPut('inspections', currentInspDraft); }, null).then(function(){ refreshCoverPhotoPreview(null); toast('Cover photo removed'); });
     });
   });
 
@@ -4582,7 +4624,7 @@ function wireSectionList(){
     if(!currentInspDraft) return;
     currentInspDraft.summary = val;
     currentInspDraft.updatedAt = Date.now();
-    idbPut('inspections', currentInspDraft);
+    guardedWrite(currentInspDraft.id, function(){ return idbPut('inspections', currentInspDraft); }, null);
   }, 500);
   if(summaryEl) summaryEl.addEventListener('input', function(){ debouncedListSummarySave(summaryEl.value); });
 
@@ -4591,7 +4633,7 @@ function wireSectionList(){
     if(!currentInspDraft) return;
     currentInspDraft.conclusion = val;
     currentInspDraft.updatedAt = Date.now();
-    idbPut('inspections', currentInspDraft);
+    guardedWrite(currentInspDraft.id, function(){ return idbPut('inspections', currentInspDraft); }, null);
   }, 500);
   if(conclusionEl) conclusionEl.addEventListener('input', function(){ debouncedListConclusionSave(conclusionEl.value); });
 
@@ -4659,7 +4701,7 @@ function openAddSectionModal(){
       closeAddSectionModal();
       toast('Section added');
       navigate('section', {sectionSr:null, customSectionId: cs.id});
-    });
+    }).catch(function(){ closeAddSectionModal(); });
   });
 }
 function closeAddSectionModal(){
@@ -4960,7 +5002,7 @@ function wireSectionDetail(){
         deleteCustomSection(state.inspectionId, state.customSectionId).then(function(){
           toast('Section removed');
           navigate('sections', {inspectionId: state.inspectionId});
-        });
+        }).catch(function(){});
       });
     });
   }
@@ -5762,7 +5804,7 @@ function handlePhotoFiles(e){
       if(!currentInspDraft) return;
       currentInspDraft.vesselPhoto = photo;
       currentInspDraft.updatedAt = Date.now();
-      idbPut('inspections', currentInspDraft).then(function(){
+      guardedWrite(currentInspDraft.id, function(){ return idbPut('inspections', currentInspDraft); }, null).then(function(){
         refreshCoverPhotoPreview(compressed);
         toast('Cover photo added');
       });
@@ -5993,7 +6035,7 @@ function wireReport(){
     if(!currentInspDraft) return;
     currentInspDraft.summary = val;
     currentInspDraft.updatedAt = Date.now();
-    idbPut('inspections', currentInspDraft);
+    guardedWrite(currentInspDraft.id, function(){ return idbPut('inspections', currentInspDraft); }, null);
   }, 500);
   if(summaryEl) summaryEl.addEventListener('input', function(){ debouncedSummarySave(summaryEl.value); });
 
@@ -6002,7 +6044,7 @@ function wireReport(){
     if(!currentInspDraft) return;
     currentInspDraft.conclusion = val;
     currentInspDraft.updatedAt = Date.now();
-    idbPut('inspections', currentInspDraft);
+    guardedWrite(currentInspDraft.id, function(){ return idbPut('inspections', currentInspDraft); }, null);
   }, 500);
   if(conclusionEl) conclusionEl.addEventListener('input', function(){ debouncedConclusionSave(conclusionEl.value); });
 
@@ -6018,7 +6060,7 @@ function wireReport(){
     currentInspDraft.status = goingToComplete ? 'completed' : 'in_progress';
     currentInspDraft.updatedAt = Date.now();
     var inspectionId = state.inspectionId;
-    idbPut('inspections', currentInspDraft).then(function(){
+    guardedWrite(currentInspDraft.id, function(){ return idbPut('inspections', currentInspDraft); }, null).then(function(){
       toast('Status updated');
       render();
       if(goingToComplete) showReportPreviewAndDownload(inspectionId);
