@@ -3991,9 +3991,9 @@ function renderSectionList(){
         '<input type="text" id="sectionSearchInput" placeholder="Search sections" autocomplete="off">'+
         '<button class="search-clear" id="sectionSearchClear" aria-label="Clear search" style="display:none;">'+ICONS.x+'</button>'+
       '</div>'+
-      (appLightMode ? '<div class="section-pad" style="margin:0 0 10px;"><div class="extras-hint" style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--accent-tint);border:1px solid var(--accent);border-radius:10px;padding:10px 12px;margin:0;color:var(--accent-dark);"><span><strong>Light mode</strong> \u00b7 Photo sections only</span><button class="btn-ghost" id="btnExitLightMode" style="padding:0;">Show all</button></div></div>' : '')+
+      (appLightMode ? '<div class="section-pad" style="margin:0 0 10px;"><div class="extras-hint" style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--accent-tint);border:1px solid var(--accent);border-radius:10px;padding:10px 12px;margin:0;color:var(--accent-dark);"><span><strong>Light mode</strong> \u00b7 Photo sections only</span></div></div>' : '')+
       '<div id="sectionListBody">'+rows+customRows+'</div>'+
-      (appLightMode && !(rows+customRows) ? '<div class="empty-state" style="margin:6px 16px 16px;"><p>This inspection has no Photo sections.<br>Tap “Show all” to switch to Normal mode'+(isAdminRole()?', or add a Photo section below':'')+'.</p></div>' : '')+
+      (appLightMode && !(rows+customRows) ? '<div class="empty-state" style="margin:6px 16px 16px;"><p>This inspection has no Photo sections.<br>Switch to Normal mode on the main page'+(isAdminRole()?', or add a Photo section below':'')+'.</p></div>' : '')+
       '<div class="empty-state" id="noSectionMatches" style="display:none;margin:6px 16px 16px;"><p>No sections match your search.</p></div>'+
       (isAdminRole() ? '<div class="section-pad" style="margin:4px 0 16px;">'+
         '<button class="btn btn-outline btn-block" id="btnAddSection">'+ICONS.plus+'Add section</button>'+
@@ -4020,8 +4020,6 @@ function filterSectionList(query){
   if(clearBtn) clearBtn.style.display = q==='' ? 'none' : '';
 }
 function wireSectionList(){
-  var btnExitLight = document.getElementById('btnExitLightMode');
-  if(btnExitLight) btnExitLight.addEventListener('click', function(){ setLightMode(false); toast('Normal mode on'); render(); });
   document.querySelectorAll('[data-open-section]').forEach(function(btn){
     btn.addEventListener('click', function(){
       navigate('section', {sectionSr: parseInt(btn.getAttribute('data-open-section'),10), customSectionId: null});
