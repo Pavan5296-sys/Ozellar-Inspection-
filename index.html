@@ -827,9 +827,49 @@ function findQuestionById(section, qId){
    else should use instead of touching insp.sections directly. */
 function ensureInspectionSections(insp){
   if(!insp) return Promise.resolve(insp);
-  if(Array.isArray(insp.sections) && insp.sections.length) return Promise.resolve(insp);
-  insp.sections = cloneSections(SECTIONS);
+  var changed = false;
+  if(!(Array.isArray(insp.sections) && insp.sections.length)){
+    insp.sections = cloneSections(SECTIONS);
+    changed = true;
+  } else if(mergeTemplatePhotoSections(insp)){
+    changed = true;
+  }
+  if(!changed) return Promise.resolve(insp);
   return idbPut('inspections', insp).then(function(){ return insp; }).catch(function(){ return insp; });
+}
+/* PHOTO SECTIONS REACH EVERY VESSEL — unlike question sections (frozen per
+   inspection on purpose), a Photo section on the master checklist is added
+   to every inspection that isn't completed yet, the next time it's opened.
+   It has no questions, so it never changes an inspection's progress count.
+   Inserted right after the same neighbour it has on the master checklist.
+   Returns true if anything was added. */
+function mergeTemplatePhotoSections(insp){
+  if(!insp || insp.status==='completed' || !Array.isArray(insp.sections)) return false;
+  var have = {};
+  insp.sections.forEach(function(s){ have[s.sr] = true; });
+  var added = false;
+  SECTIONS.forEach(function(tpl, idx){
+    if(!isPhotoOnlySection(tpl) || have[tpl.sr]) return;
+    var insertAt = 0;
+    for(var j=idx-1; j>=0; j--){
+      var prevSr = SECTIONS[j].sr;
+      var pos = -1;
+      for(var k=0; k<insp.sections.length; k++){ if(insp.sections[k].sr===prevSr){ pos = k; break; } }
+      if(pos>-1){ insertAt = pos+1; break; }
+    }
+    insp.sections.splice(insertAt, 0, cloneSections([tpl])[0]);
+    have[tpl.sr] = true;
+    added = true;
+  });
+  return added;
+}
+/* Adds a new Photo section to the master checklist (so every vessel's open
+   and future inspections get it). Resolves with the new section's sr. */
+function addTemplatePhotoSection(name){
+  var sr = sectionsNextSr++;
+  SECTIONS.push({sr: sr, zone: '', name: name, q: [], nextQid: 0, photoOnly: true});
+  recomputeTotalQuestions();
+  return saveSectionsTemplate().then(function(){ return sr; });
 }
 function inspectionSections(insp){
   return (insp && Array.isArray(insp.sections) && insp.sections.length) ? insp.sections : SECTIONS;
@@ -4084,7 +4124,10 @@ function openAddSectionModal(){
       '<div class="field"><label>Section type</label><div class="section-type-options">'+
         '<label><input type="radio" name="newSectionType" value="findings" checked>Findings section<small>Observations with photos</small></label>'+
         '<label><input type="radio" name="newSectionType" value="photos">Photo section<small>Photos only, mark defects</small></label>'+
-      '</div></div>' : '')+
+      '</div></div>'+
+      '<div class="field" id="newSectionAllWrap" style="display:none;"><label style="display:flex;gap:8px;align-items:flex-start;font-weight:600;">'+
+        '<input type="checkbox" id="newSectionAllVessels" checked style="width:auto;margin-top:3px;">'+
+        '<span>Add to all vessels<small style="display:block;font-weight:400;color:var(--faint);">Adds it to the checklist, so every open and future inspection gets this Photo section.</small></span></label></div>' : '')+
     '<div class="form-actions">'+
       '<button class="btn btn-outline" id="cancelAddSection">Cancel</button>'+
       '<button class="btn btn-primary" id="confirmAddSection">Add section</button>'+
@@ -4096,12 +4139,30 @@ function openAddSectionModal(){
 
   var nameInput = document.getElementById('newSectionName');
   nameInput.focus();
+  var allWrap = document.getElementById('newSectionAllWrap');
+  document.querySelectorAll('input[name="newSectionType"]').forEach(function(r){
+    r.addEventListener('change', function(){
+      var t = document.querySelector('input[name="newSectionType"]:checked');
+      if(allWrap) allWrap.style.display = (t && t.value==='photos') ? '' : 'none';
+    });
+  });
 
   document.getElementById('confirmAddSection').addEventListener('click', function(){
     var name = nameInput.value.trim();
     if(!name){ toast('Enter a section name'); nameInput.focus(); return; }
     var typeEl = document.querySelector('input[name="newSectionType"]:checked');
     var photoOnly = !!(typeEl && typeEl.value==='photos' && isAdminRole());
+    var allEl = document.getElementById('newSectionAllVessels');
+    if(photoOnly && allEl && allEl.checked){
+      addTemplatePhotoSection(name).then(function(sr){
+        return idbGet('inspections', state.inspectionId).then(ensureInspectionSections).then(function(){
+          closeAddSectionModal();
+          toast('Photo section added to all vessels');
+          navigate('section', {sectionSr: sr, customSectionId: null});
+        });
+      });
+      return;
+    }
     createCustomSection(state.inspectionId, name, photoOnly).then(function(cs){
       closeAddSectionModal();
       toast('Section added');
@@ -4330,6 +4391,10 @@ function renderCustomSectionDetail(){
         '<div style="padding-top:14px;">'+
           (photoOnly ? sectionPhotosCardHTML(extras, true)
                      : extrasBlockHTML(extras, 'Findings', 'Log what you observed in this section. Add a photo if it helps.'))+
+          (isAdminRole() && photoOnly ? '<div class="section-pad" style="margin:0 0 12px;">'+
+            '<button class="btn btn-outline btn-block" id="btnPhotoSectionToAll">Add this Photo section to all vessels</button>'+
+            '<p class="footer-note" style="text-align:left;padding:6px 2px 0;">Right now it exists only in this inspection. This moves it onto the checklist (keeping its photos here), so every vessel’s open and future inspections get it.</p>'+
+          '</div>' : '')+
           (isAdminRole() ? '<div class="section-pad" style="margin:0 0 24px;">'+
             '<button class="delete-link" id="btnDeleteCustomSection">Delete this section</button>'+
           '</div>' : '')+
@@ -4368,6 +4433,33 @@ function wireSectionDetail(){
       });
     });
   }
+  var toAllBtn = document.getElementById('btnPhotoSectionToAll');
+  if(toAllBtn && isAdminRole()) toAllBtn.addEventListener('click', function(){
+    var inspId = state.inspectionId, csId = state.customSectionId;
+    toAllBtn.disabled = true; toAllBtn.textContent = 'Please wait…';
+    idbGet('customSections', csId).then(function(cs){
+      if(!cs) throw new Error('missing');
+      return getOrCreateSectionExtras(inspId, csId).then(function(oldExtras){
+        return addTemplatePhotoSection(cs.name).then(function(sr){
+          return idbGet('inspections', inspId).then(ensureInspectionSections).then(function(){
+            return getOrCreateSectionExtras(inspId, sr);
+          }).then(function(newExtras){
+            newExtras.photos = (newExtras.photos||[]).concat(oldExtras.photos||[]);
+            newExtras.customFindings = (newExtras.customFindings||[]).concat(oldExtras.customFindings||[]);
+            return saveSectionExtras(newExtras);
+          }).then(function(){
+            return deleteCustomSection(inspId, csId);
+          }).then(function(){
+            toast('Added to all vessels');
+            navigate('section', {sectionSr: sr, customSectionId: null});
+          });
+        });
+      });
+    }).catch(function(){
+      toAllBtn.disabled = false; toAllBtn.textContent = 'Add this Photo section to all vessels';
+      toast('Could not add — try again');
+    });
+  });
   var deleteSectionBtn = document.getElementById('btnDeleteCustomSection');
   if(deleteSectionBtn){
     deleteSectionBtn.addEventListener('click', function(){
