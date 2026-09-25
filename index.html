@@ -3953,11 +3953,11 @@ function renderSectionList(){
       '</div>'+
       (appLightMode ? '<div class="section-pad" style="margin:0 0 10px;"><div class="extras-hint" style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--accent-tint);border:1px solid var(--accent);border-radius:10px;padding:10px 12px;margin:0;color:var(--accent-dark);"><span><strong>Light mode</strong> \u00b7 Photo sections only</span><button class="btn-ghost" id="btnExitLightMode" style="padding:0;">Show all</button></div></div>' : '')+
       '<div id="sectionListBody">'+rows+customRows+'</div>'+
-      (appLightMode && !(rows+customRows) ? '<div class="empty-state" style="margin:6px 16px 16px;"><p>This inspection has no Photo sections.<br>Tap “Show all” to switch to Normal mode, or add a Photo section below.</p></div>' : '')+
+      (appLightMode && !(rows+customRows) ? '<div class="empty-state" style="margin:6px 16px 16px;"><p>This inspection has no Photo sections.<br>Tap “Show all” to switch to Normal mode'+(isAdminRole()?', or add a Photo section below':'')+'.</p></div>' : '')+
       '<div class="empty-state" id="noSectionMatches" style="display:none;margin:6px 16px 16px;"><p>No sections match your search.</p></div>'+
-      '<div class="section-pad" style="margin:4px 0 16px;">'+
+      (isAdminRole() ? '<div class="section-pad" style="margin:4px 0 16px;">'+
         '<button class="btn btn-outline btn-block" id="btnAddSection">'+ICONS.plus+'Add section</button>'+
-      '</div>'+
+      '</div>' : '')+
       '<div style="padding-top:2px;">'+coverPhotoCardHTML(insp.vesselPhoto)+writeUpCardHTML(insp)+'</div>'+
       '<div class="report-fab">'+
         '<button class="btn btn-accent" id="btnViewReport">View report &amp; findings</button>'+
@@ -4018,7 +4018,7 @@ function wireSectionList(){
   }
 
   var addSectionBtn = document.getElementById('btnAddSection');
-  if(addSectionBtn) addSectionBtn.addEventListener('click', openAddSectionModal);
+  if(addSectionBtn && isAdminRole()) addSectionBtn.addEventListener('click', openAddSectionModal);
 
   var backupNowBtn = document.getElementById('btnBackupNow');
   if(backupNowBtn) backupNowBtn.addEventListener('click', function(){
@@ -4068,6 +4068,7 @@ function wireSectionList(){
 }
 
 function openAddSectionModal(){
+  if(!isAdminRole()) return;
   closeAddSectionModal();
   var backdrop = document.createElement('div');
   backdrop.className = 'sheet-backdrop';
@@ -4329,9 +4330,9 @@ function renderCustomSectionDetail(){
         '<div style="padding-top:14px;">'+
           (photoOnly ? sectionPhotosCardHTML(extras, true)
                      : extrasBlockHTML(extras, 'Findings', 'Log what you observed in this section. Add a photo if it helps.'))+
-          '<div class="section-pad" style="margin:0 0 24px;">'+
+          (isAdminRole() ? '<div class="section-pad" style="margin:0 0 24px;">'+
             '<button class="delete-link" id="btnDeleteCustomSection">Delete this section</button>'+
-          '</div>'+
+          '</div>' : '')+
         '</div>';
       });
     });
