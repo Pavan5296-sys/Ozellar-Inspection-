@@ -2482,6 +2482,9 @@ function wireManageUsers(){
         {label:'Edit role', icon:ICONS.edit, onClick:function(){
           navigate('assignUser', {assignUserEmail:email, assignUserName:info.name, assignUserRole:info.role, assignUserFleet:info.fleet});
         }},
+        {label:'Set password', icon:ICONS.lock, onClick:function(){
+          showSetPasswordSheet(email, info.role, info.name);
+        }},
         {label:'Resend invite email', icon:ICONS.mail, onClick:function(){
           if(!sb){ toast('Not connected — try again in a moment'); return; }
           toast('Sending…');
@@ -2555,6 +2558,83 @@ function showInviteMessage(email, role, name, emailSent){
     }catch(e){ manual(); }
   });
 }
+/* ADMIN-SET PASSWORDS — calls the admin_set_password() database function
+   (see the one-time setup SQL). It runs on the server with admin rights,
+   checks that the caller is an admin, and creates the user's sign-in (or
+   replaces their password) so they can sign in straight away with no
+   email link. Returns {error:string|null}. */
+function sbAdminSetPassword(email, password){
+  if(!sb) return Promise.resolve({error:'Not connected — try again in a moment'});
+  return sb.rpc('admin_set_password', {target_email:email, new_password:password}).then(function(res){
+    if(!res.error) return {error:null};
+    var m = res.error.message || '';
+    if(/admin_set_password|schema cache|does not exist|PGRST202/i.test(m+' '+(res.error.code||'')))
+      return {error:'Password setup isn’t installed in the database yet — run the setup SQL in Supabase first'};
+    return {error:'Could not set password: '+m};
+  }).catch(function(e){ return {error:'Could not set password — check your connection'}; });
+}
+function credentialsMessageFor(email, role, name, password){
+  var roleLabel = role==='admin' ? 'Admin' : role==='director' ? 'Director' : role==='techManager' ? 'Tech Manager' : role==='vesselManager' ? 'Vessel Manager' : 'a user';
+  return 'Hi'+(name?' '+name:'')+',\n\n'+
+    'You’ve been added to Ozellar All Right Inspection as '+(/^[aeiou]/i.test(roleLabel)?'an ':'a ')+roleLabel+'.\n\n'+
+    'Open: '+window.location.origin+window.location.pathname+'\n'+
+    'Email: '+email+'\n'+
+    'Password: '+password+'\n\n'+
+    'After signing in, you can change your password from the round icon at the top right → Change password.';
+}
+function showCredentialsMessage(email, role, name, password){
+  var msg = credentialsMessageFor(email, role, name, password);
+  var backdrop = document.createElement('div'); backdrop.className = 'sheet-backdrop';
+  var panel = document.createElement('div'); panel.className = 'form-sheet';
+  panel.innerHTML = '' +
+    '<h3>Password set</h3>'+
+    '<p style="color:var(--faint);font-size:14px;">'+escapeHtml(email)+' can now sign in with this password. Send them the details below.</p>'+
+    '<div class="field"><label>Message to send</label><textarea id="credMsgBox" rows="8" readonly style="width:100%;resize:vertical;">'+escapeHtml(msg)+'</textarea></div>'+
+    '<div class="form-actions">'+
+      '<button class="btn btn-outline" id="credCloseBtn">Close</button>'+
+      '<button class="btn btn-primary" id="credCopyBtn">Copy</button>'+
+    '</div>';
+  document.body.appendChild(backdrop); document.body.appendChild(panel);
+  function close(){ backdrop.remove(); panel.remove(); }
+  backdrop.addEventListener('click', close);
+  document.getElementById('credCloseBtn').addEventListener('click', close);
+  document.getElementById('credCopyBtn').addEventListener('click', function(){
+    var box = document.getElementById('credMsgBox');
+    function manual(){ if(box){ box.focus(); box.select(); } toast('Selected — copy with Ctrl/Cmd+C'); }
+    try{
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(msg).then(function(){ toast('Copied'); }).catch(manual);
+      } else manual();
+    }catch(e){ manual(); }
+  });
+}
+function showSetPasswordSheet(email, role, name){
+  var backdrop = document.createElement('div'); backdrop.className = 'sheet-backdrop';
+  var panel = document.createElement('div'); panel.className = 'form-sheet';
+  panel.innerHTML = '' +
+    '<h3>Set password</h3>'+
+    '<p style="color:var(--faint);font-size:14px;">Set a password for '+escapeHtml(email)+'. This replaces any password they already have.</p>'+
+    '<div class="field"><label>New password</label><input type="text" id="setPwInput" placeholder="At least 6 characters" autocomplete="off" autocapitalize="off" spellcheck="false"></div>'+
+    '<div class="form-actions">'+
+      '<button class="btn btn-outline" id="setPwCancel">Cancel</button>'+
+      '<button class="btn btn-primary" id="setPwSave">Set password</button>'+
+    '</div>';
+  document.body.appendChild(backdrop); document.body.appendChild(panel);
+  function close(){ backdrop.remove(); panel.remove(); }
+  backdrop.addEventListener('click', close);
+  document.getElementById('setPwCancel').addEventListener('click', close);
+  var saveBtn = document.getElementById('setPwSave');
+  saveBtn.addEventListener('click', function(){
+    var pw = document.getElementById('setPwInput').value || '';
+    if(pw.length<6){ toast('Password should be at least 6 characters'); return; }
+    saveBtn.disabled = true; saveBtn.textContent = 'Please wait…';
+    sbAdminSetPassword(email, pw).then(function(r){
+      if(r.error){ saveBtn.disabled = false; saveBtn.textContent = 'Set password'; toast(r.error); return; }
+      close();
+      showCredentialsMessage(email, role, name, pw);
+    });
+  });
+}
 function sbSendInviteEmail(email){
   if(!sb) return Promise.resolve({error:{message:'not connected'}});
   var redirectTo = (typeof window!=='undefined' && window.location) ? (window.location.origin + window.location.pathname) : undefined;
@@ -2589,6 +2669,12 @@ function renderAssignUser(){
         '<label>Name <span class="footer-note" style="display:inline;padding:0;">(optional, for your own reference)</span></label>'+
         '<input type="text" id="assignNameInput" placeholder="Their name" autocomplete="off" value="'+escapeHtml(state.assignUserName||'')+'">'+
       '</div>'+
+      (isEdit ? '' :
+      '<div class="field">'+
+        '<label>Initial password <span class="footer-note" style="display:inline;padding:0;">(optional)</span></label>'+
+        '<input type="text" id="assignPasswordInput" placeholder="At least 6 characters" autocomplete="off" autocapitalize="off" spellcheck="false">'+
+        '<p class="footer-note" style="text-align:left;padding:4px 0 0;">If you set one, no invite email is sent. Share the email and password with them yourself. They can change it later from the account menu.</p>'+
+      '</div>')+
       '<div class="field">'+
         '<label>Role</label>'+
         '<div class="seg" id="roleSeg">'+
@@ -2651,6 +2737,8 @@ function wireAssignUser(){
       document.querySelectorAll('.fleet-vessel-checkbox:checked').forEach(function(cb){ fleet.push(cb.value); });
       if(!fleet.length){ toast(role==='vesselManager' ? 'Pick at least one vessel for them to manage' : 'Pick at least one vessel for their fleet'); return; }
     }
+    var pwCheck = document.getElementById('assignPasswordInput');
+    if(pwCheck && pwCheck.value && pwCheck.value.length<6){ toast('Password should be at least 6 characters'); return; }
     if(email===BOOTSTRAP_ADMIN_EMAIL){
       toast(BOOTSTRAP_ADMIN_EMAIL+' is always Admin — nothing to save');
       return;
@@ -2665,6 +2753,17 @@ function wireAssignUser(){
       if(wasEdit){
         toast('Saved');
         navigate('manageUsers');
+        return;
+      }
+      var pwInput = document.getElementById('assignPasswordInput');
+      var initialPw = (pwInput && pwInput.value) || '';
+      if(initialPw){
+        toast('Saved — setting password…');
+        sbAdminSetPassword(email, initialPw).then(function(r){
+          navigate('manageUsers');
+          if(r.error){ toast(r.error); return; }
+          showCredentialsMessage(email, role, name, initialPw);
+        });
         return;
       }
       toast('Saved — sending invite email…');
