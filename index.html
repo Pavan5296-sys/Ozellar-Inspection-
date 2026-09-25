@@ -2095,6 +2095,8 @@ function renderAuthGateHTML(){
       (sbSyncState.authError ? '<div style="color:var(--bad,#C1432A);font-size:13px;">'+escapeHtml(sbSyncState.authError)+'</div>' : '')+
       '<button class="btn btn-primary" id="gateSignIn" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>'+(busy?'Please wait…':'Sign in')+'</button>'+
       '<button class="btn btn-outline" id="gateSignUp" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>Create account</button>'+
+      '<button class="btn btn-outline" id="gateEmailLink" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>Forgot password? Email me a sign-in link</button>'+
+      (sbSyncState.authInfo ? '<div style="color:var(--faint);font-size:13px;">'+escapeHtml(sbSyncState.authInfo)+'</div>' : '')+
     '</div>'+
   '</div>';
 }
@@ -2103,6 +2105,21 @@ function wireAuthGate(){
   var btnSignUp = document.getElementById('gateSignUp');
   var emailInput = document.getElementById('gateEmail');
   var passInput = document.getElementById('gatePassword');
+  var btnLink = document.getElementById('gateEmailLink');
+  if(btnLink) btnLink.addEventListener('click', function(){
+    var email=(emailInput.value||'').trim().toLowerCase();
+    sbSyncState.lastEmail = email;
+    sbSyncState.authInfo = null;
+    if(!email || email.indexOf('@')===-1){ sbSyncState.authError='Enter your email first.'; renderSyncStatus(); return; }
+    sbSyncState.authBusy = true; sbSyncState.authError = null; renderSyncStatus();
+    var redirectTo = window.location.origin + window.location.pathname;
+    sb.auth.signInWithOtp({email:email, options:{shouldCreateUser:false, emailRedirectTo:redirectTo}}).then(function(res){
+      sbSyncState.authBusy = false;
+      if(res.error){ sbSyncState.authError = res.error.message; }
+      else { sbSyncState.authInfo = 'Check your email for a sign-in link. After opening it you can set a new password.'; }
+      renderSyncStatus();
+    }).catch(sbAuthFailSafe);
+  });
   if(btnSignIn) btnSignIn.addEventListener('click', function(){
     var email=(emailInput.value||'').trim(), pass=passInput.value||'';
     sbSyncState.lastEmail = email;
@@ -2150,6 +2167,7 @@ function renderPasswordSetupHTML(){
       '<input type="password" id="pwSetupPassword2" placeholder="Confirm password" autocomplete="new-password" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:15px;">'+
       (sbSyncState.authError ? '<div style="color:var(--bad,#C1432A);font-size:13px;">'+escapeHtml(sbSyncState.authError)+'</div>' : '')+
       '<button class="btn btn-primary" id="pwSetupSave" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>'+(busy?'Please wait…':'Save password')+'</button>'+
+      '<button class="btn btn-outline" id="pwSetupSkip" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>Skip for now</button>'+
     '</div>'+
   '</div>';
 }
@@ -2158,6 +2176,13 @@ function wirePasswordSetup(){
   var pw1 = document.getElementById('pwSetupPassword');
   var pw2 = document.getElementById('pwSetupPassword2');
   var saveBtn = document.getElementById('pwSetupSave');
+  var skipBtn = document.getElementById('pwSetupSkip');
+  if(skipBtn) skipBtn.addEventListener('click', function(){
+    sbClearEmailLinkFlag();
+    sbNeedsPasswordSetup = false;
+    sbSyncState.authError = null;
+    renderSyncStatus();
+  });
   if(saveBtn) saveBtn.addEventListener('click', function(){
     var p1 = (pw1 && pw1.value) || '', p2 = (pw2 && pw2.value) || '';
     if(p1.length<6){ sbSyncState.authError='Password should be at least 6 characters.'; renderSyncStatus(); return; }
@@ -2165,7 +2190,8 @@ function wirePasswordSetup(){
     sbSyncState.authBusy = true; sbSyncState.authError = null; renderSyncStatus();
     sb.auth.updateUser({password:p1}).then(function(res){
       if(res.error){ sbSyncState.authBusy=false; sbSyncState.authError=res.error.message; renderSyncStatus(); return; }
-      return sb.rpc('mark_password_set').then(function(){
+      sbClearEmailLinkFlag();
+      return sb.rpc('mark_password_set').then(function(){},function(){}).then(function(){
         sbNeedsPasswordSetup = false;
         sbSyncState.authBusy = false;
         renderSyncStatus();
@@ -6576,6 +6602,26 @@ function initCloudSync(){
    get right first, at the cost of using more of the database's free-tier
    storage than a separate file-storage approach would.
    ===================================================================== */
+/* True when this page was opened from an emailed sign-in / invite link
+   (Supabase puts access_token or a ?code= in the URL). Captured here,
+   before supabase-js reads and clears the URL. Anyone arriving this way
+   is offered the "Create your password" screen, so an invited user can
+   always set a password even if the database's password_set flag was
+   never written. */
+var sbArrivedViaEmailLink = false;
+try{
+  var _h = (window.location.hash||''), _q = (window.location.search||'');
+  if(/access_token=|type=(magiclink|invite|recovery|signup)/.test(_h) || /[?&](code|token_hash)=/.test(_q)){
+    sbArrivedViaEmailLink = true;
+    try{ sessionStorage.setItem('ozellarEmailLink','1'); }catch(e){}
+  } else {
+    try{ sbArrivedViaEmailLink = sessionStorage.getItem('ozellarEmailLink')==='1'; }catch(e){}
+  }
+}catch(e){}
+function sbClearEmailLinkFlag(){
+  sbArrivedViaEmailLink = false;
+  try{ sessionStorage.removeItem('ozellarEmailLink'); }catch(e){}
+}
 var SUPABASE_URL = 'https://dgbierhekwndcxrlyhja.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRnYmllcmhla3duZGN4cmx5aGphIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAwMjQzNjUsImV4cCI6MjEwNTYwMDM2NX0.vpadiQskYEDpM7V5Pjb_lgyj388W50b0s9_XxSx6SWs';
 var sb = null;
@@ -7024,7 +7070,7 @@ function initUserRole(){
     // screen yet; treat anything else (true, or missing on an older row
     // this account somehow predates) as already set, never re-trap
     // someone who already has a working password.
-    sbNeedsPasswordSetup = (data.password_set===false);
+    sbNeedsPasswordSetup = (data.password_set===false) || sbArrivedViaEmailLink;
     return currentRole;
   }).catch(function(){
     currentRole = {type:'unassigned', fleet:[], userId:sbUser.id, name:''};
