@@ -2994,7 +2994,7 @@ function wireAssignUser(){
    Whenever the app comes back to the foreground (and every 10 minutes),
    compare this copy's version with the one online; if they differ, show a
    bar to tap for the new version. */
-var APP_VERSION = '2026-09-26-0920';
+var APP_VERSION = '2026-09-26-0930';
 var appUpdateShown = false;
 function checkForAppUpdate(){
   if(appUpdateShown || typeof fetch!=='function' || !navigator.onLine) return;
@@ -6750,15 +6750,7 @@ function buildInspectionPDF(insp, responses, extrasList, customSectionsList, ves
     function renderGeneralPhotos(extras, photoOnly){
       if(!extras || !extras.photos || !extras.photos.length) return;
       chain = chain.then(function(){
-        y = pdfEnsureSpace(doc, y, 55); // label + first photo row kept together
-        doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(PDF_COLOR.teal[0],PDF_COLOR.teal[1],PDF_COLOR.teal[2]);
-        var nDef = extras.photos.filter(function(p){ return p && p.defect; }).length;
-        doc.text(photoOnly ? 'Photos ('+extras.photos.length+')' : 'General section photos', PDF_MARGIN, y);
-        if(nDef){
-          doc.setTextColor(139,0,0);
-          doc.text(nDef+' marked as defect (red frame)', PDF_MARGIN+PDF_CONTENT_W, y, {align:'right'});
-        }
-        y += 6;
+        y = pdfEnsureSpace(doc, y, 50); // keep the first photo row with its section heading
         return photoDataUrls(extras.photos).then(function(urls){
           return pdfAddPhotoRow(doc, urls, PDF_MARGIN, y, PDF_CONTENT_W, 45).then(function(newY){ y = newY + 6; });
         });
@@ -6996,9 +6988,7 @@ function buildPrintableReport(insp, responses, extrasList, customSectionsList, v
     if(!extras || !extras.photos || !extras.photos.length) return '';
     return '' +
       '<div class="pr-q">'+
-        '<span class="pref">General</span> Section photos '+
         '<div class="pr-photos">'+pushPhotoImgs(extras.photos)+'</div>'+
-        (extras.photos.some(function(p){ return p && p.defect; }) ? '<div class="pr-defect-legend">Red frame = defect</div>' : '')+
       '</div>';
   }
   function customFindingsRowsHtml(extras){
