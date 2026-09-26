@@ -2233,6 +2233,9 @@ function renderAuthGateHTML(){
       '<button class="btn btn-outline" id="gateSignUp" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>Create account</button>'+
       '<button class="btn btn-outline" id="gateEmailLink" style="width:100%;margin-left:0;" '+(busy?'disabled':'')+'>Forgot password? Email me a sign-in link</button>'+
       (sbSyncState.authInfo ? '<div style="color:var(--faint);font-size:13px;">'+escapeHtml(sbSyncState.authInfo)+'</div>' : '')+
+      (sbSyncState.otpSentTo ? '<div style="display:flex;gap:8px;">'+
+        '<input type="text" id="gateOtpCode" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="Code from email" style="flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:16px;letter-spacing:2px;">'+
+        '<button class="btn btn-primary" id="gateOtpVerify" style="margin-left:0;" '+(busy?'disabled':'')+'>Verify</button></div>' : '')+
     '</div>'+
   '</div>';
 }
@@ -2251,9 +2254,31 @@ function wireAuthGate(){
     var redirectTo = window.location.origin + window.location.pathname;
     sb.auth.signInWithOtp({email:email, options:{shouldCreateUser:false, emailRedirectTo:redirectTo}}).then(function(res){
       sbSyncState.authBusy = false;
-      if(res.error){ sbSyncState.authError = res.error.message; }
-      else { sbSyncState.authInfo = 'Check your email for a sign-in link. After opening it you can set a new password.'; }
+      if(res.error){ sbSyncState.authError = friendlyAuthEmailError(res.error.message); sbSyncState.otpSentTo = null; }
+      else {
+        sbSyncState.otpSentTo = email;
+        sbSyncState.authInfo = 'Email sent. Enter the code from the email below (or open the link in it). You can then set a new password.';
+      }
       renderSyncStatus();
+    }).catch(sbAuthFailSafe);
+  });
+  var btnOtp = document.getElementById('gateOtpVerify');
+  if(btnOtp) btnOtp.addEventListener('click', function(){
+    var code = ((document.getElementById('gateOtpCode')||{}).value||'').replace(/\s+/g,'');
+    var email = sbSyncState.otpSentTo || (emailInput.value||'').trim().toLowerCase();
+    if(!code){ sbSyncState.authError = 'Enter the code from the email.'; renderSyncStatus(); return; }
+    sbSyncState.authBusy = true; sbSyncState.authError = null; renderSyncStatus();
+    sb.auth.verifyOtp({email: email, token: code, type: 'email'}).then(function(res){
+      sbSyncState.authBusy = false;
+      if(res.error){ sbSyncState.authError = /expired|invalid/i.test(res.error.message||'') ? 'That code is wrong or has expired. Tap “Forgot password?” to get a new one.' : res.error.message; renderSyncStatus(); return; }
+      // Signed in by code: go straight to "set a new password".
+      sbArrivedViaEmailLink = true;
+      try{ sessionStorage.setItem('ozellarEmailLink','1'); }catch(e){}
+      sbSyncState.otpSentTo = null; sbSyncState.authInfo = null;
+      sbUser = (res.data && (res.data.user || (res.data.session && res.data.session.user))) || sbUser;
+      return refreshRoleAndSync().then(function(){
+        if(sbUser) return sbPullAll().then(function(){ return sbPushLocalBacklog(); });
+      });
     }).catch(sbAuthFailSafe);
   });
   if(btnSignIn) btnSignIn.addEventListener('click', function(){
@@ -2969,7 +2994,7 @@ function wireAssignUser(){
    Whenever the app comes back to the foreground (and every 10 minutes),
    compare this copy's version with the one online; if they differ, show a
    bar to tap for the new version. */
-var APP_VERSION = '2026-09-25-2145';
+var APP_VERSION = '2026-09-26-0920';
 var appUpdateShown = false;
 function checkForAppUpdate(){
   if(appUpdateShown || typeof fetch!=='function' || !navigator.onLine) return;
@@ -6753,7 +6778,7 @@ function buildInspectionPDF(insp, responses, extrasList, customSectionsList, ves
       section.q.forEach(function(pair){ if(respMap[section.sr+'_'+pair[2]]) hasAny = true; });
       if(!hasAny) return;
       chain = chain.then(function(){
-        y = pdfSectionBand(doc, String(sectionDisplayNumber(section, reportSections)).padStart(2,'0')+'.  '+section.name, y);
+        y = pdfSectionBand(doc, section.name, y);
       });
       renderGeneralPhotos(extras, isPhotoOnlySection(section));
       section.q.forEach(function(pair){
@@ -7076,7 +7101,7 @@ function buildPrintableReport(insp, responses, extrasList, customSectionsList, v
     if(cfRows){ anyRow = true; rowsHtml += cfRows; }
 
     if(anyRow){
-      sectionsHtml += '<div class="pr-sec-h">'+escapeHtml(String(sectionDisplayNumber(section, reportSections)).padStart(2,'0'))+'. '+escapeHtml(section.name)+'</div>'+rowsHtml;
+      sectionsHtml += '<div class="pr-sec-h">'+escapeHtml(section.name)+'</div>'+rowsHtml;
     }
   });
   (customSectionsList||[]).forEach(function(cs){
@@ -7742,6 +7767,15 @@ function refreshRoleAndSync(){
    retry. A plain wrong password/email is already caught by the `res.error`
    branch below and never reaches this; this is the belt-and-braces for
    everything else. */
+/* Supabase's built-in email service only delivers to the project's own
+   team members, about 2 emails an hour — explain that in plain words. */
+function friendlyAuthEmailError(msg){
+  msg = msg || '';
+  if(/not authori[sz]ed/i.test(msg)) return 'Email could not be sent to this address yet. Ask your admin to set your password (Manage users → Set password), or to finish the email setup in Supabase.';
+  if(/rate limit|too many|security purposes/i.test(msg)) return 'Too many emails sent recently. Wait a while and try again, or ask your admin to set your password (Manage users → Set password).';
+  if(/signups not allowed|user not found/i.test(msg)) return 'No account found for this email. Ask your admin to add you.';
+  return msg;
+}
 function sbAuthFailSafe(err){
   sbSyncState.authBusy = false;
   sbSyncState.authError = (err && err.message) ? err.message : 'Something went wrong — please try again.';
