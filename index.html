@@ -2999,7 +2999,7 @@ function wireAssignUser(){
    Whenever the app comes back to the foreground (and every 10 minutes),
    compare this copy's version with the one online; if they differ, show a
    bar to tap for the new version. */
-var APP_VERSION = '2026-10-01-1600';
+var APP_VERSION = '2026-10-02-0200';
 var appUpdateShown = false;
 function checkForAppUpdate(){
   if(appUpdateShown || typeof fetch!=='function' || !navigator.onLine) return;
@@ -3582,8 +3582,7 @@ function wireHome(){
         if(!blockedMsg) items.push({label:'Edit vessel details', icon:ICONS.edit, onClick:function(){ navigate('form',{formMode:'edit', inspectionId:id}); }});
         items.push({label:'Export backup (JSON)', icon:ICONS.json, onClick:function(){ exportInspectionJSON(id); }});
         items.push({label:'Export CSV', icon:ICONS.csv, onClick:function(){ exportInspectionCSV(id); }});
-        items.push({label:'Download Photo sections (ZIP)', icon:ICONS.download, onClick:function(){ downloadAllPhotos(id, {onlyPhotoSections:true}); }});
-        items.push({label:'Download all photos (ZIP)', icon:ICONS.download, onClick:function(){ downloadAllPhotos(id); }});
+        items.push({label:'Download photos (ZIP)…', icon:ICONS.download, onClick:function(){ showPhotoDownloadSheet(id, {}); }});
         if(!blockedMsg){
           items.push({divider:true});
           items.push({label:'Delete inspection', icon:ICONS.trash, danger:true, onClick:function(){
@@ -4620,8 +4619,12 @@ function renderSectionList(){
       '</div>'+
       (appLightMode ? '<div class="section-pad" style="margin:0 0 10px;"><div class="extras-hint" style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--accent-tint);border:1px solid var(--accent);border-radius:10px;padding:10px 12px;margin:0;color:var(--accent-dark);"><span><strong>Light mode</strong> \u00b7 Photo sections only</span></div></div>' : '')+
       '<div id="sectionListBody">'+rows+customRows+'</div>'+
-      (appLightMode && !(rows+customRows) ? '<div class="empty-state" style="margin:6px 16px 16px;"><p>This inspection has no Photo sections.<br>Switch to Normal mode on the main page'+(isAdminRole()?', or add a Photo section below':'')+'.</p></div>' : '')+
+      (appLightMode && !(rows+customRows) ? '<div class="empty-state" style="margin:6px 16px 16px;"><p>This inspection has no Photo sections.<br>Add one with “Add Photo section” below, or switch to Normal mode on the main page.</p></div>' : '')+
       '<div class="empty-state" id="noSectionMatches" style="display:none;margin:6px 16px 16px;"><p>No sections match your search.</p></div>'+
+      (appLightMode && !isDirectorRole() && !(insp.approval && ['tm','director','approved'].indexOf(insp.approval.stage)>-1)
+        ? '<div class="section-pad" style="margin:4px 0 8px;">'+
+            '<button class="btn btn-primary btn-block" id="btnAddPhotoSectionLight">'+ICONS.plus+'Add Photo section (this vessel only)</button>'+
+          '</div>' : '')+
       (isAdminRole() ? '<div class="section-pad" style="margin:4px 0 16px;">'+
         '<button class="btn btn-outline btn-block" id="btnAddSection">'+ICONS.plus+'Add section</button>'+
       '</div>' : '')+
@@ -4647,6 +4650,17 @@ function filterSectionList(query){
   if(clearBtn) clearBtn.style.display = q==='' ? 'none' : '';
 }
 function wireSectionList(){
+  var addLight = document.getElementById('btnAddPhotoSectionLight');
+  if(addLight) addLight.addEventListener('click', function(){
+    showPrompt('New Photo section name', '', 'e.g. Cargo hold 3 photos', 'Add').then(function(name){
+      if(!name) return;
+      // Added to THIS inspection only (this vessel); the checklist and other vessels are not touched.
+      createCustomSection(state.inspectionId, name, true).then(function(cs){
+        toast('Photo section added');
+        navigate('section', {sectionSr:null, customSectionId: cs.id});
+      }).catch(function(){});
+    });
+  });
   document.querySelectorAll('[data-open-section]').forEach(function(btn){
     btn.addEventListener('click', function(){
       navigate('section', {sectionSr: parseInt(btn.getAttribute('data-open-section'),10), customSectionId: null});
@@ -4964,7 +4978,7 @@ function renderSectionDetail(){
           '<div class="title-wrap"><h1>'+escapeHtml(section.name)+'</h1><p class="sub">Photo section \u00b7 '+sectionDisplayNumber(section, sections)+' of '+sections.length+'</p></div>'+
         '</div>'+
         '<div style="padding-top:14px;">'+sectionPhotosCardHTML(extras, true)+
-          '<div class="section-pad" style="margin:0 0 24px;"><button class="btn btn-outline btn-block" id="btnDownloadThisSection" data-section-key="'+section.sr+'">'+ICONS.download+'Download these photos (ZIP)</button></div>'+
+          '<div class="section-pad" style="margin:0 0 24px;"><button class="btn btn-outline btn-block" id="btnDownloadThisSection" data-section-key="'+section.sr+'">'+ICONS.download+'Download photos (ZIP)…</button></div>'+
         '</div>';
       }
       var total = section.q.length, done=0;
@@ -4984,6 +4998,7 @@ function renderSectionDetail(){
         sectionPhotosCardHTML(extras)+
         cards+
         extrasBlockFooterHTML(extras, 'Additional findings', 'Add anything you noticed here that is not covered by the questions above.')+
+        '<div class="section-pad" style="margin:0 0 24px;"><button class="btn btn-outline btn-block" id="btnDownloadThisSection" data-section-key="'+section.sr+'">'+ICONS.download+'Download photos (ZIP)…</button></div>'+
       '</div>';
     });
     });
@@ -5017,8 +5032,8 @@ function renderCustomSectionDetail(){
         '</div>'+
         '<div style="padding-top:14px;">'+
           (photoOnly ? sectionPhotosCardHTML(extras, true)+
-                       '<div class="section-pad" style="margin:0 0 12px;"><button class="btn btn-outline btn-block" id="btnDownloadThisSection" data-section-key="'+escapeHtml(cs.id)+'">'+ICONS.download+'Download these photos (ZIP)</button></div>'
-                     : extrasBlockHTML(extras, 'Findings', 'Log what you observed in this section. Add a photo if it helps.'))+
+                       '<div class="section-pad" style="margin:0 0 24px;"><button class="btn btn-outline btn-block" id="btnDownloadThisSection" data-section-key="'+escapeHtml(cs.id)+'">'+ICONS.download+'Download photos (ZIP)…</button></div>'
+                     : extrasBlockHTML(extras, 'Findings', 'Log what you observed in this section. Add a photo if it helps.')+'<div class="section-pad" style="margin:0 0 24px;"><button class="btn btn-outline btn-block" id="btnDownloadThisSection" data-section-key="'+escapeHtml(cs.id)+'">'+ICONS.download+'Download photos (ZIP)…</button></div>')+
           (isAdminRole() && photoOnly ? '<div class="section-pad" style="margin:0 0 12px;">'+
             '<button class="btn btn-outline btn-block" id="btnPhotoSectionToAll">Add this Photo section to all vessels</button>'+
             '<p class="footer-note" style="text-align:left;padding:6px 2px 0;">Right now it exists only in this inspection. This moves it onto the checklist (keeping its photos here), so every vessel’s open and future inspections get it.</p>'+
@@ -5036,7 +5051,7 @@ function wireSectionDetail(){
   var dlSec = document.getElementById('btnDownloadThisSection');
   if(dlSec) dlSec.addEventListener('click', function(){
     var key = dlSec.getAttribute('data-section-key');
-    downloadAllPhotos(state.inspectionId, {sectionKey: /^\d+$/.test(key) ? Number(key) : key});
+    showPhotoDownloadSheet(state.inspectionId, {sectionKey: /^\d+$/.test(key) ? Number(key) : key});
   });
   document.querySelectorAll('.qcard[data-photo-mode="question"]').forEach(function(card){
     wireQuestionCard(card);
@@ -6108,8 +6123,7 @@ function renderReport(){
         '<button class="btn btn-outline" id="btnPrintReport">'+ICONS.printer+'Preview report'+'</button>'+
         '<button class="btn btn-outline" id="btnExportJson">'+ICONS.json+'Export backup (JSON)</button>'+
         '<button class="btn btn-outline" id="btnExportCsv">'+ICONS.csv+'Export CSV</button>'+
-        '<button class="btn btn-outline" id="btnDownloadPhotoSections">'+ICONS.download+'Download Photo sections (ZIP)</button>'+
-        '<button class="btn btn-outline" id="btnDownloadPhotos">'+ICONS.download+'Download all photos (ZIP)</button>'+
+        '<button class="btn btn-outline" id="btnDownloadPhotos">'+ICONS.download+'Download photos (ZIP)…</button>'+
       '</div>'+
       '<div class="print-only" id="printArea">'+printHtml+'</div>';
     });
@@ -6177,9 +6191,7 @@ function wireReport(){
   if(jsonBtn) jsonBtn.addEventListener('click', function(){ exportInspectionJSON(state.inspectionId); });
 
   var dlPhotosBtn = document.getElementById('btnDownloadPhotos');
-  if(dlPhotosBtn) dlPhotosBtn.addEventListener('click', function(){ downloadAllPhotos(state.inspectionId); });
-  var dlPsBtn = document.getElementById('btnDownloadPhotoSections');
-  if(dlPsBtn) dlPsBtn.addEventListener('click', function(){ downloadAllPhotos(state.inspectionId, {onlyPhotoSections:true}); });
+  if(dlPhotosBtn) dlPhotosBtn.addEventListener('click', function(){ showPhotoDownloadSheet(state.inspectionId, {}); });
   var csvBtn = document.getElementById('btnExportCsv');
   if(csvBtn) csvBtn.addEventListener('click', function(){ exportInspectionCSV(state.inspectionId); });
 }
@@ -7258,18 +7270,72 @@ function zipSafeName(s){
 /* Phones (especially an iPhone Home-Screen app) handle a Share sheet far more
    reliably than a download link: it offers "Save to Files", AirDrop, WhatsApp,
    Mail… Falls back to a normal download when sharing files isn't available. */
-function saveOrShareZip(zip, fname){
+function saveOrShareZip(zip, fname, note){
   var isPhone = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent||'');
-  try{
-    var file = new File([zip], fname, {type:'application/zip'});
-    if(isPhone && navigator.canShare && navigator.canShare({files:[file]})){
-      return navigator.share({files:[file], title: fname}).then(function(){ return true; }, function(err){
-        if(err && err.name==='AbortError') return false;          // user closed the sheet
-        return downloadBlob(zip, fname, 'application/zip');        // sharing failed → plain download
+  var file = null;
+  try{ file = new File([zip], fname, {type:'application/zip'}); }catch(e){}
+  var canShare = false;
+  try{ canShare = !!(isPhone && file && navigator.canShare && navigator.canShare({files:[file]})); }catch(e){}
+  if(!canShare) return downloadBlob(zip, fname, 'application/zip');
+  /* Phones only open the Share sheet straight after a tap, and building the ZIP
+     took a moment — so ask for one more tap on a "ready" sheet. */
+  return new Promise(function(resolve){
+    var backdrop = document.createElement('div'); backdrop.className = 'sheet-backdrop';
+    var panel = document.createElement('div'); panel.className = 'form-sheet';
+    panel.innerHTML = '<h3>Your ZIP is ready</h3>'+
+      '<p style="color:var(--faint);font-size:14px;">'+escapeHtml(fname)+(note?'<br>'+escapeHtml(note):'')+'</p>'+
+      '<div class="form-actions" style="flex-direction:column;gap:8px;">'+
+        '<button class="btn btn-primary" id="zipShareBtn" style="width:100%;margin-left:0;">Save / Share…</button>'+
+        '<button class="btn btn-outline" id="zipDlBtn" style="width:100%;margin-left:0;">Download instead</button>'+
+        '<button class="btn btn-outline" id="zipCloseBtn" style="width:100%;margin-left:0;">Close</button>'+
+      '</div>';
+    document.body.appendChild(backdrop); document.body.appendChild(panel);
+    function close(v){ backdrop.remove(); panel.remove(); resolve(v); }
+    backdrop.addEventListener('click', function(){ close(false); });
+    document.getElementById('zipCloseBtn').addEventListener('click', function(){ close(false); });
+    document.getElementById('zipDlBtn').addEventListener('click', function(){ downloadBlob(zip, fname, 'application/zip').then(function(){ close(true); }); });
+    document.getElementById('zipShareBtn').addEventListener('click', function(){
+      navigator.share({files:[file], title: fname}).then(function(){ close(true); }, function(err){
+        if(err && err.name==='AbortError') return; // closed the share sheet; keep this sheet open
+        downloadBlob(zip, fname, 'application/zip').then(function(){ close(true); });
       });
-    }
-  }catch(e){}
-  return downloadBlob(zip, fname, 'application/zip');
+    });
+  });
+}
+/* Chooser: which photos (all / defects only / non-defects only) and, for a
+   whole inspection, which sections (all / Photo sections only). */
+function showPhotoDownloadSheet(inspId, base){
+  base = base || {};
+  var whole = base.sectionKey==null;
+  var backdrop = document.createElement('div'); backdrop.className = 'sheet-backdrop';
+  var panel = document.createElement('div'); panel.className = 'form-sheet';
+  function radio(name, val, label, checked){
+    return '<label style="display:flex;gap:10px;align-items:center;padding:8px 0;font-size:15px;"><input type="radio" name="'+name+'" value="'+val+'"'+(checked?' checked':'')+' style="width:auto;">'+label+'</label>';
+  }
+  panel.innerHTML = '<h3>Download photos</h3>'+
+    (whole ? '<div class="field"><label>Sections</label>'+
+      radio('dlScope','all','All sections',true)+radio('dlScope','photo','Photo sections only',false)+'</div>' : '')+
+    '<div class="field"><label>Photos</label>'+
+      radio('dlFilter','all','All photos',true)+
+      radio('dlFilter','defect','Defect photos only',false)+
+      radio('dlFilter','nodefect','Non-defect photos only',false)+'</div>'+
+    '<div class="form-actions">'+
+      '<button class="btn btn-outline" id="dlCancel">Cancel</button>'+
+      '<button class="btn btn-primary" id="dlGo">'+ICONS.download+'Download</button>'+
+    '</div>';
+  document.body.appendChild(backdrop); document.body.appendChild(panel);
+  function close(){ backdrop.remove(); panel.remove(); }
+  backdrop.addEventListener('click', close);
+  document.getElementById('dlCancel').addEventListener('click', close);
+  document.getElementById('dlGo').addEventListener('click', function(){
+    var f = panel.querySelector('input[name="dlFilter"]:checked');
+    var sc = panel.querySelector('input[name="dlScope"]:checked');
+    var opts = {filter: f ? f.value : 'all'};
+    if(base.sectionKey!=null) opts.sectionKey = base.sectionKey;
+    else if(sc && sc.value==='photo') opts.onlyPhotoSections = true;
+    close();
+    downloadAllPhotos(inspId, opts);
+  });
 }
 function downloadAllPhotos(inspId, opts){
   opts = opts || {};
@@ -7289,6 +7355,8 @@ function downloadAllPhotos(inspId, opts){
     var jobs = [], used = {}, missing = 0;
     function add(folder, base, photos){
       (photos||[]).forEach(function(p, idx){
+        if(opts.filter==='defect' && !(p && p.defect)) return;
+        if(opts.filter==='nodefect' && p && p.defect) return;
         if(!p || !p.blob){ missing++; return; }
         var name = zipSafeName(folder)+'/'+zipSafeName(base)+' '+String(idx+1).padStart(2,'0')+(p.defect?' DEFECT':'')+'.jpg';
         while(used[name]) name = name.replace(/\.jpg$/, '_.jpg');
@@ -7321,7 +7389,8 @@ function downloadAllPhotos(inspId, opts){
     customs.forEach(function(cs){ if(wanted(cs.id, isPhotoOnlySection(cs))) addSection(cs.id, cs.name, isPhotoOnlySection(cs)); });
     if(!jobs.length){
       toast(missing ? 'Photos haven’t downloaded to this device yet — tap Sync now and try again'
-                    : (opts.onlyPhotoSections ? 'No photos in the Photo sections of this inspection' : 'No photos here yet'));
+                    : (opts.filter==='defect' ? 'No defect photos here' : opts.filter==='nodefect' ? 'No non-defect photos here'
+                       : opts.onlyPhotoSections ? 'No photos in the Photo sections of this inspection' : 'No photos here yet'));
       return;
     }
     var files = [], chain = Promise.resolve();
@@ -7332,10 +7401,11 @@ function downloadAllPhotos(inspId, opts){
     });
     return chain.then(function(){
       var zip = buildZip(files);
-      var label = opts.sectionKey!=null ? (jobs[0].name.split('/')[0]) : (opts.onlyPhotoSections ? 'Photo sections' : 'photos');
+      var label = (opts.sectionKey!=null ? (jobs[0].name.split('/')[0]) : (opts.onlyPhotoSections ? 'Photo sections' : 'photos'))+
+                  (opts.filter==='defect' ? ' - defects only' : opts.filter==='nodefect' ? ' - no defects' : '');
       var fname = zipSafeName((insp.vesselName||'Vessel')+' '+(insp.date||'')+' '+label)+'.zip';
       var note = files.length+' photo'+(files.length===1?'':'s')+(missing?' ('+missing+' not on this device yet)':'');
-      return saveOrShareZip(zip, fname).then(function(ok){ if(ok) toast(note+' ready'); });
+      return saveOrShareZip(zip, fname, note).then(function(ok){ if(ok) toast(note+' saved'); });
     });
   }).catch(function(e){ toast('Could not prepare photos: '+((e&&e.message)||'error')); });
 }
